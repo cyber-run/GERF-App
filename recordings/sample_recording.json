@@ -1,0 +1,43 @@
+{
+  "player": "TestPlayer",
+  "startTime": "2024-01-15T10:30:00.000Z",
+  "endTime": "2024-01-15T10:30:05.500Z",
+  "duration": 5500,
+  "pointCount": 25,
+  "coordinates": [
+    {
+      "x": 1.234,
+      "y": 2.567,
+      "z": 3.890,
+      "type": "trajectory",
+      "timestamp": 1705315800000,
+      "recordingTime": 100
+    },
+    {
+      "x": 1.245,
+      "y": 2.578,
+      "z": 3.901,
+      "type": "trajectory",
+      "timestamp": 1705315800200,
+      "recordingTime": 300
+    },
+    {
+      "x": 1.256,
+      "y": 2.589,
+      "z": 3.912,
+      "type": "trajectory",
+      "timestamp": 1705315800400,
+      "recordingTime": 500
+    }
+  ],
+  "metadata": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "timestamp": 1705315800000
+  },
+  "fileInfo": {
+    "filename": "recording_TestPlayer_2024-01-15T10-30-00-000Z.json",
+    "storageKey": "gerf-recording-1705315805500",
+    "savedAt": "2024-01-15T10:30:05.500Z",
+    "version": "1.0"
+  }
+} 
