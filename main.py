@@ -20,8 +20,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Production Configuration - Edit these values for your setup
-PRODUCTION_UDP_HOST = '127.0.0.1'  # Change to actual UDP server IP
-PRODUCTION_UDP_PORT = 12346        # Port for adapter to receive DART data
+PRODUCTION_UDP_HOST = '192.168.137.1'  # Windows DART server IP address
+PRODUCTION_UDP_PORT = 12346        # Port for adapter to receive DART data (confirm this matches your DART server)
 WEBSOCKET_PORT = 8765              # WebSocket bridge port
 USE_DART_ADAPTER = True            # Set to True to use DART tracking system adapter
 
