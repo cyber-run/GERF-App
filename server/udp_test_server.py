@@ -2,6 +2,9 @@
 """
 UDP Test Server for GERF-App
 Simple coordinate generator that will be replaced by external UDP server in production.
+Can run in two modes:
+1. Client mode (default): Waits for client connections and sends data to them
+2. DART mode (--dart-mode): Broadcasts data like the DART visual tracking system
 """
 
 import socket
@@ -11,12 +14,18 @@ import time
 import logging
 import math
 import random
+import argparse
+import os
 from datetime import datetime, timedelta
 from config import *
 
 # Client management
 CLIENTS = {}
 CLIENT_LOCK = threading.Lock()
+
+# Server mode
+DART_BROADCAST_MODE = False
+DART_BROADCAST_PORT = 12346
 
 # Trajectory state management
 trajectory_state = {
@@ -29,12 +38,41 @@ trajectory_state = {
     'linear_current_target': None  # Current randomized target position
 }
 
+# Load custom target position if available
+def load_custom_target_position():
+    """Load custom target position from target_position.json if it exists."""
+    target_file = 'target_position.json'
+    if os.path.exists(target_file):
+        try:
+            with open(target_file, 'r') as f:
+                data = json.load(f)
+                target_pos = data.get('target_position', {})
+                if all(key in target_pos for key in ['x', 'y', 'z']):
+                    custom_target = (target_pos['x'], target_pos['y'], target_pos['z'])
+                    logger.info(f"Custom target position loaded: {custom_target}")
+                    logger.info(f"Exported at: {data.get('exported_at', 'unknown')}")
+                    return custom_target
+                else:
+                    logger.warning(f"Invalid target position format in {target_file}")
+        except (json.JSONDecodeError, FileNotFoundError, KeyError) as e:
+            logger.warning(f"Could not load custom target position: {e}")
+    return None
+
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper()),
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Load custom target position and override config if found
+CUSTOM_TARGET = load_custom_target_position()
+if CUSTOM_TARGET:
+    # Override the config target position
+    LINEAR_TARGET_POSITION = CUSTOM_TARGET
+    logger.info(f"Using custom target position: {LINEAR_TARGET_POSITION}")
+else:
+    logger.info(f"Using default target position: {LINEAR_TARGET_POSITION}")
 
 # Initialize random seed if specified
 if LINEAR_RANDOM_SEED is not None:
@@ -158,14 +196,25 @@ def generate_3d_coordinates():
     y = max(min(y, COORDINATE_RANGE_Y[1]), COORDINATE_RANGE_Y[0])
     z = max(min(z, COORDINATE_RANGE_Z[1]), COORDINATE_RANGE_Z[0])
     
-    return {
-        'x': round(x, 2),
-        'y': round(y, 2),
-        'z': round(z, 2),
-        'timestamp': time.time(),
-        'trajectory_type': trajectory_state['type'],
-        'progress': trajectory_state.get('linear_progress', 0.0) if trajectory_state['type'] == 'linear' else None
-    }
+    if DART_BROADCAST_MODE:
+        # Generate DART visual tracking format
+        # Scale up coordinates to "millimeter" scale since DART adapter will scale them down by 0.1
+        mm_scale_factor = 10.0  # DART adapter uses 0.1 scale, so we multiply by 10
+        return {
+            'timestamp': time.time(),
+            'point_3d': [x * mm_scale_factor, y * mm_scale_factor, z * mm_scale_factor],
+            'frame_id': int(time.time() * 100) % 1000000  # Simple frame counter
+        }
+    else:
+        # Generate GERF format for direct client connections
+        return {
+            'x': round(x, 2),
+            'y': round(y, 2),
+            'z': round(z, 2),
+            'timestamp': time.time(),
+            'trajectory_type': trajectory_state['type'],
+            'progress': trajectory_state.get('linear_progress', 0.0) if trajectory_state['type'] == 'linear' else None
+        }
 
 def switch_trajectory(new_type):
     """Switch between trajectory types."""
@@ -391,5 +440,77 @@ def generate_random_target():
     
     return random_target
 
+def start_dart_broadcast_server():
+    """Start server in DART broadcast mode - broadcasts data like visual tracking system."""
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)  # Enable broadcast
+        
+        logger.info(f"UDP Test Server started in DART broadcast mode on port {DART_BROADCAST_PORT}")
+        logger.info("Broadcasting test data in DART visual tracking format")
+        logger.info("Mimics DART system - broadcasts JSON with timestamp, point_3d, frame_id")
+        logger.info("Coordinates are scaled by 10x to simulate millimeter units (DART adapter will scale back down)")
+        
+        frame_counter = 0
+        
+        while True:
+            try:
+                coordinates = generate_3d_coordinates()
+                
+                if coordinates is not None:
+                    # Override frame_id with proper counter
+                    coordinates['frame_id'] = frame_counter
+                    frame_counter += 1
+                    
+                    message = json.dumps(coordinates).encode('utf-8')
+                    
+                    # Broadcast to localhost (adapter will be listening)
+                    sock.sendto(message, ('127.0.0.1', DART_BROADCAST_PORT))
+                    
+                    # Log occasionally for monitoring
+                    if frame_counter <= 5 or frame_counter % 1000 == 0:
+                        # Calculate original coordinates for display
+                        point_3d = coordinates['point_3d']
+                        orig_coords = [round(p/10.0, 2) for p in point_3d]  # Divide by scale factor
+                        logger.info(f"Broadcast frame #{frame_counter}: original={orig_coords} → scaled={point_3d}")
+                
+                time.sleep(STREAM_FREQUENCY)
+                
+            except KeyboardInterrupt:
+                logger.info("Shutdown signal received")
+                break
+            except Exception as e:
+                logger.error(f"Error in broadcast loop: {e}")
+                time.sleep(1)  # Brief pause before retrying
+                
+    except OSError as e:
+        logger.critical(f"Broadcast socket error: {e}")
+    except Exception as e:
+        logger.critical(f"Fatal broadcast server error: {e}")
+    finally:
+        logger.info("UDP Test Server (DART mode) shutting down...")
+        if sock:
+            sock.close()
+        logger.info("UDP Test Server (DART mode) shutdown complete")
+
 if __name__ == "__main__":
-    start_server() 
+    parser = argparse.ArgumentParser(description='UDP Test Server for GERF-App')
+    parser.add_argument('--dart-mode', action='store_true',
+                        help='Run in DART broadcast mode (mimics DART visual tracking system)')
+    
+    args = parser.parse_args()
+    
+    # Set global mode
+    DART_BROADCAST_MODE = args.dart_mode
+    
+    if DART_BROADCAST_MODE:
+        print("🎯 Starting UDP Test Server in DART Broadcast Mode")
+        print(f"📡 Broadcasting test data on port {DART_BROADCAST_PORT}")
+        print("🔄 Mimics DART visual tracking system broadcasts")
+        start_dart_broadcast_server()
+    else:
+        print("👥 Starting UDP Test Server in Client Mode")
+        print(f"📡 Listening for clients on port {UDP_PORT}")
+        print("🔄 Sends data to connected clients")
+        start_server() 

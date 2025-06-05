@@ -22,7 +22,7 @@
 
         <!-- Scoring Panel -->
         <div id="scoring-panel">
-            <h3>🎯 Dart Scoring</h3>
+            <h3>🎯 Archery Scoring</h3>
             
             <div class="player-input-section">
                 <div class="input-group">
@@ -51,32 +51,6 @@
                     </div>
                 </div>
                 
-                <div class="session-stats-section">
-                    <h4>Session Stats</h4>
-                    <div class="session-stats">
-                        <div class="stat-item">
-                            <span class="stat-label">Rounds:</span>
-                            <span class="stat-value" id="throw-count">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Total Score:</span>
-                            <span class="stat-value" id="session-score">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Best Round:</span>
-                            <span class="stat-value" id="best-throw">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Bullseyes:</span>
-                            <span class="stat-value" id="bullseye-count">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Avg Score:</span>
-                            <span class="stat-value" id="average-distance">0.0</span>
-                        </div>
-                    </div>
-                </div>
-                
                 <div class="scoring-zones-section">
                     <h4>Scoring Zones</h4>
                     <div class="scoring-zones">
@@ -95,9 +69,19 @@
                             <span class="zone-name">Outer (≤10)</span>
                             <span class="zone-points">10 pts</span>
                         </div>
+                        <div class="zone-item outer2">
+                            <span class="zone-color" style="background: #9B59B6;"></span>
+                            <span class="zone-name">Outer 2 (≤16)</span>
+                            <span class="zone-points">5 pts</span>
+                        </div>
+                        <div class="zone-item outer3">
+                            <span class="zone-color" style="background: #34495E;"></span>
+                            <span class="zone-name">Outer 3 (≤22)</span>
+                            <span class="zone-points">1 pt</span>
+                        </div>
                         <div class="zone-item miss">
                             <span class="zone-color" style="background: #95A5A6;"></span>
-                            <span class="zone-name">Miss (>10)</span>
+                            <span class="zone-name">Miss (>22)</span>
                             <span class="zone-points">0 pts</span>
                         </div>
                     </div>
@@ -105,77 +89,60 @@
                 
                 <div class="throw-controls">
                     <button id="clear-history" class="btn btn-secondary">Clear History</button>
-                    <button id="export-throws" class="btn btn-secondary">Export Rounds</button>
-                </div>
-                
-                <!-- Throw History Panel (moved inside toggle) -->
-                <div class="throw-history-section">
-                    <h4>📊 Recent Rounds</h4>
-                    <div id="throw-history-container">
-                        <p class="no-throws">No rounds completed yet</p>
-                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Recording Panel -->
-        <div id="recording-panel" style="display: none;">
-            <h3>🎯 Recording Control</h3>
+        <!-- Leaderboard Panel -->
+        <div id="leaderboard-panel">
+            <h3>🏆 Leaderboard</h3>
             
-            <div class="button-group">
-                <button id="start-recording" class="btn btn-start">Start Recording</button>
-                <button id="stop-recording" class="btn btn-stop" disabled>Stop Recording</button>
-            </div>
-            
-            <div id="recording-status" class="recording-inactive">
-                <div class="status-item">
-                    <span class="status-label">Status:</span>
-                    <span class="status-value" id="recording-state">Ready</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Points:</span>
-                    <span class="status-value" id="points-captured">0</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Duration:</span>
-                    <span class="status-value" id="recording-duration">0s</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Player:</span>
-                    <span class="status-value" id="current-player">--</span>
+            <!-- Top 3 Best Attempts -->
+            <div class="top-attempts-section">
+                <h4>🥇 Top 3 Attempts</h4>
+                <div id="top-attempts-container">
+                    <p class="no-attempts">No attempts yet</p>
                 </div>
             </div>
             
-            <!-- Recording Settings integrated here -->
-            <div class="recording-settings-section">
-                <h4>💾 Recording Settings</h4>
-                
-                <div class="settings-group">
-                    <div class="setting-item">
-                        <label>
-                            <input type="checkbox" id="auto-save-toggle" checked>
-                            Auto-save recordings to file
-                        </label>
+            <!-- Session Stats -->
+            <div class="session-stats-section">
+                <h4>📊 Session Stats</h4>
+                <div class="session-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Rounds:</span>
+                        <span class="stat-value" id="throw-count">0</span>
                     </div>
-                    
-                    <div class="setting-item">
-                        <label for="save-location">Save Method:</label>
-                        <select id="save-location">
-                            <option value="download">Auto Download</option>
-                            <option value="picker">Choose Location</option>
-                        </select>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Score:</span>
+                        <span class="stat-value" id="session-score">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Best Round:</span>
+                        <span class="stat-value" id="best-throw">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Bullseyes:</span>
+                        <span class="stat-value" id="bullseye-count">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Avg Score:</span>
+                        <span class="stat-value" id="average-distance">0.0</span>
                     </div>
                 </div>
-                
-                <div class="button-group">
-                    <button id="export-all" class="btn btn-secondary">Export All</button>
-                    <button id="view-recordings" class="btn btn-secondary">View Recordings</button>
+            </div>
+            
+            <!-- Recent Rounds -->
+            <div class="recent-rounds-section">
+                <h4>📈 Recent Rounds</h4>
+                <div id="throw-history-container">
+                    <p class="no-throws">No rounds completed yet</p>
                 </div>
-                
-                <div id="recordings-list" class="recordings-list" style="display: none;">
-                    <h4>Saved Recordings:</h4>
-                    <div id="recordings-container"></div>
-                </div>
+            </div>
+            
+            <div class="leaderboard-controls">
+                <button id="show-full-leaderboard" class="btn btn-primary">Show Full Leaderboard</button>
+                <button id="clear-attempts" class="btn btn-secondary">Clear All Attempts</button>
             </div>
         </div>
     </div>
@@ -184,10 +151,13 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <!-- GLTFLoader -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <!-- OrbitControls for simple camera navigation -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- TransformControls for interactive object manipulation -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
     
     <!-- Application Modules -->
     <script src="js/throw-manager.js"></script>
-    <script src="js/recording-manager.js"></script>
     <script src="js/scene-manager.js"></script>
     <script src="js/websocket-manager.js"></script>
 
@@ -200,6 +170,9 @@
             sceneManager = new SceneManager();
             throwManager = new ThrowManager(sceneManager);
             websocketManager = new WebSocketManager(sceneManager, null, throwManager);
+            
+            // Make throwManager globally accessible for keyboard shortcuts
+            window.throwManager = throwManager;
 
             // Handle window resize
             window.addEventListener('resize', () => {
@@ -210,10 +183,6 @@
             document.addEventListener('keydown', (event) => {
                 if (event.ctrlKey || event.metaKey) {
                     switch(event.key) {
-                        case 't':
-                            event.preventDefault();
-                            throwManager.exportRoundHistory();
-                            break;
                         case 'c':
                             event.preventDefault();
                             throwManager.clearRoundHistory();
@@ -226,36 +195,58 @@
                             event.preventDefault();
                             throwManager.forceEndRound();
                             break;
+                        case 'p':
+                            event.preventDefault();
+                            throwManager.exportAttemptsLeaderboard();
+                            break;
+                        case 'g':
+                            event.preventDefault();
+                            sceneManager.downloadTargetPosition();
+                            break;
                     }
                 }
             });
 
             console.log('🚀 GERF-App initialized successfully!');
-            console.log('🎮 Mouse Controls:');
-            console.log('  • Drag: Rotate camera');
-            console.log('  • Scroll: Zoom in/out');
+            console.log('🎮 Camera Controls:');
+            console.log('  • Left Mouse: Orbit around scene');
+            console.log('  • Right Mouse: Pan camera');
+            console.log('  • Mouse Wheel: Zoom in/out');
             console.log('🎯 Scene Controls:');
-            console.log('  • R: Reset camera position');
-            console.log('  • S: Toggle starfield');
+            console.log('  • R: Reset camera position (or Rotate mode if target selected)');
+            console.log('  • S: Toggle starfield (or Scale mode if target selected)');
             console.log('  • Z: Toggle scoring zone indicators');
             console.log('  • X: Clear visual indicators');
-            console.log('  • M: Toggle dartboard center marker');
-            console.log('🎯 Dartboard Calibration:');
-            console.log('  • Arrow Keys: Adjust X/Y offset (±0.5)');
-            console.log('  • , / . : Adjust Z offset backward/forward (±0.5)');
-            console.log('  • 0: Reset dartboard offset to calibrated default');
-            console.log('  • Enter: Save current calibration to localStorage');
-            console.log('  • Backspace: Clear saved calibration and reset');
+            console.log('  • V: Toggle trajectory tracking (manual)');
+            console.log('  • C: Clear trajectory trail');
+            console.log('  • L: Show leaderboard');
+            console.log('🎯 Target Transform:');
+            console.log('  • Click target to select for transformation');
+            console.log('  • T: Translate mode (move target)');
+            console.log('  • R: Rotate mode (rotate target)');
+            console.log('  • S: Scale mode (uniform scaling - maintains proportions)');
+            console.log('  • Delete/Backspace: Reset target to default position');
+            console.log('  • Click elsewhere to deselect');
+            console.log('🎯 Axis Colors (Local Mode):');
+            console.log('  • Red Arrow = Target\'s Local X-axis');
+            console.log('  • Green Arrow = Target\'s Local Y-axis');
+            console.log('  • Blue Arrow = Target\'s Local Z-axis');
+            console.log('  • (Arrows follow target orientation)');
+            console.log('💾 Target Settings:');
+            console.log('  • Position, rotation, and scale are automatically saved');
+            console.log('  • Settings reload automatically on app startup');
             console.log('🎯 3-Throw Round System:');
             console.log('  • Enter player name to start 3-throw round');
             console.log('  • System automatically tracks throws and scores');
             console.log('  • Round completes after 3 throws, ready for next player');
-            console.log('🎯 Round Controls:');
-            console.log('  • Ctrl+T: Export round history');
+            console.log('  • Same names allowed - each round is individual attempt');
+            console.log('🎯 Data Controls:');
             console.log('  • Ctrl+C: Clear round history');
             console.log('  • Ctrl+F: Force end current throw');
             console.log('  • Ctrl+R: Force end current round');
-            console.log('📊 Scoring: 3 throws per round, automatic detection and scoring');
+            console.log('  • Ctrl+P: Export complete leaderboard data');
+            console.log('  • Ctrl+G: Download current target position (for server)');
+            console.log('📊 Scoring: Individual attempts leaderboard, automatic detection and scoring');
         }
 
         // Initialize the application when DOM is loaded

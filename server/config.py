@@ -29,7 +29,7 @@ RADIUS_VARIATION = 20
 ELEVATION_SPEED = 0.8
 
 # Linear trajectory parameters
-LINEAR_START_POSITION = (100, 80, 0)  # Starting position for linear trajectory
+LINEAR_START_POSITION = (0, 120, 0)  # Starting position for linear trajectory (above origin)
 LINEAR_TARGET_POSITION = (-60, 80, 0)  # Dartboard position
 LINEAR_DURATION = 5.0  # seconds for complete trajectory (reduced from 15.0 for faster testing)
 LINEAR_SPEED_PROFILE = 'decelerating'  # 'linear', 'accelerating', 'decelerating'

@@ -16,11 +16,12 @@ class ThrowManager {
         this.waitingForNextPlayer = false;
         
         // Scoring configuration
-        this.dartboardCenter = { x: -60, y: 80, z: 0 }; // From server config
         this.scoringZones = [
             { name: 'Bullseye', maxDistance: 2, points: 50, color: '#FFD700' },
             { name: 'Inner Ring', maxDistance: 5, points: 25, color: '#FF6B6B' },
             { name: 'Outer Ring', maxDistance: 10, points: 10, color: '#4ECDC4' },
+            { name: 'Outer Ring 2', maxDistance: 16, points: 5, color: '#9B59B6' },
+            { name: 'Outer Ring 3', maxDistance: 22, points: 1, color: '#34495E' },
             { name: 'Miss', maxDistance: Infinity, points: 0, color: '#95A5A6' }
         ];
         
@@ -38,8 +39,12 @@ class ThrowManager {
             averageScore: 0
         };
         
+        // Individual attempts leaderboard (much simpler than player database)
+        this.attemptsLeaderboard = [];
+        
         this.initializeUI();
         this.loadRoundHistory();
+        this.loadAttemptsLeaderboard();
     }
     
     initializeUI() {
@@ -57,14 +62,23 @@ class ThrowManager {
         this.averageDistanceDisplay = document.getElementById('average-distance');
         this.throwHistoryContainer = document.getElementById('throw-history-container');
         this.clearHistoryBtn = document.getElementById('clear-history');
-        this.exportThrowsBtn = document.getElementById('export-throws');
+        
+        // New leaderboard panel elements
+        this.topAttemptsContainer = document.getElementById('top-attempts-container');
+        this.showFullLeaderboardBtn = document.getElementById('show-full-leaderboard');
+        this.clearAttemptsBtn = document.getElementById('clear-attempts');
         
         // Bind event listeners
         if (this.clearHistoryBtn) {
             this.clearHistoryBtn.addEventListener('click', () => this.clearRoundHistory());
         }
-        if (this.exportThrowsBtn) {
-            this.exportThrowsBtn.addEventListener('click', () => this.exportRoundHistory());
+        
+        // New leaderboard panel event listeners
+        if (this.showFullLeaderboardBtn) {
+            this.showFullLeaderboardBtn.addEventListener('click', () => this.showLeaderboard());
+        }
+        if (this.clearAttemptsBtn) {
+            this.clearAttemptsBtn.addEventListener('click', () => this.clearAttemptsLeaderboard());
         }
         
         // Toggle details functionality
@@ -147,11 +161,12 @@ class ThrowManager {
             this.startThrow(currentTime);
         }
         
-        // Get current dartboard center from scene manager (with any offset adjustments)
-        const dartboardCenter = this.sceneManager ? this.sceneManager.getDartboardCenter() : this.dartboardCenter;
+        // Get current target center from scene manager
+        const targetCenter = this.sceneManager ? this.sceneManager.getTargetCenter() : 
+            (() => { throw new Error('SceneManager not available for target center calculation'); })();
         
-        // Calculate distance to dartboard center
-        const distance = this.calculateDistance(coordinateData, dartboardCenter);
+        // Calculate distance to target center
+        const distance = this.calculateDistance(coordinateData, targetCenter);
         
         // Add coordinate to current throw
         this.currentThrow.coordinates.push({
@@ -193,6 +208,11 @@ class ThrowManager {
         
         console.log(`Throw ${this.currentThrow.throwNumber}/3 started for ${this.currentRound.player}`);
         this.updateThrowStatus(`${this.currentRound.player} - Throw ${this.currentThrow.throwNumber}/3 active`);
+        
+        // Start trajectory tracking
+        if (this.sceneManager && this.sceneManager.startThrowTrajectory) {
+            this.sceneManager.startThrowTrajectory();
+        }
     }
     
     endThrow() {
@@ -241,6 +261,11 @@ class ThrowManager {
         
         this.currentThrow = null;
         this.updateUI();
+        
+        // Stop trajectory tracking
+        if (this.sceneManager && this.sceneManager.endThrowTrajectory) {
+            this.sceneManager.endThrowTrajectory();
+        }
     }
     
     completeRound() {
@@ -255,6 +280,14 @@ class ThrowManager {
         
         // Update session statistics
         this.updateSessionStats();
+        
+        // Add attempt to leaderboard (replaces complex player database)
+        this.addAttemptToLeaderboard(
+            this.currentRound.player, 
+            this.currentRound.totalScore, 
+            this.currentRound.throws,
+            this.currentRound.duration
+        );
         
         // Save to localStorage
         this.saveRoundHistory();
@@ -379,6 +412,9 @@ class ThrowManager {
                 this.closestDistanceDisplay.textContent = '--';
             }
         }
+        
+        // Update top attempts display
+        this.updateTopAttemptsDisplay();
     }
     
     updateThrowStatus(status) {
@@ -544,42 +580,7 @@ class ThrowManager {
     }
     
     exportRoundHistory() {
-        if (this.roundHistory.length === 0) {
-            alert('No round history to export.');
-            return;
-        }
-        
-        const exportData = {
-            sessionStats: this.sessionStats,
-            rounds: this.roundHistory.map(round => ({
-                roundNumber: round.roundNumber,
-                player: round.player,
-                startTime: round.startTime,
-                endTime: round.endTime,
-                duration: round.duration,
-                totalScore: round.totalScore,
-                throws: round.throws.map(throw_ => ({
-                    throwNumber: throw_.throwNumber,
-                    score: throw_.score,
-                    scoringZone: throw_.scoringZone?.name,
-                    closestDistance: throw_.closestDistance
-                }))
-            })),
-            exportDate: new Date().toISOString(),
-            gameFormat: '3-throw rounds',
-            dartboardCenter: this.dartboardCenter,
-            scoringZones: this.scoringZones
-        };
-        
-        const dataStr = JSON.stringify(exportData, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(dataBlob);
-        link.download = `gerf-rounds-${new Date().toISOString().split('T')[0]}.json`;
-        link.click();
-        
-        console.log('Round history exported');
+        // This method is no longer used after removing Ctrl+T
     }
     
     // Manual control methods
@@ -629,5 +630,181 @@ class ThrowManager {
             this.detailsVisible = false; // Will be toggled to true
             this.toggleScoringDetails();
         }
+    }
+    
+    // Individual attempts leaderboard (much simpler than player database)
+    loadAttemptsLeaderboard() {
+        try {
+            const savedLeaderboard = localStorage.getItem('gerf-attempts-leaderboard');
+            if (savedLeaderboard) {
+                this.attemptsLeaderboard = JSON.parse(savedLeaderboard);
+                console.log(`Loaded attempts leaderboard with ${this.attemptsLeaderboard.length} entries`);
+                
+                // Update displays after loading
+                this.updateTopAttemptsDisplay();
+            }
+        } catch (error) {
+            console.error('Error loading attempts leaderboard:', error);
+            this.attemptsLeaderboard = [];
+        }
+    }
+    
+    saveAttemptsLeaderboard() {
+        try {
+            localStorage.setItem('gerf-attempts-leaderboard', JSON.stringify(this.attemptsLeaderboard));
+        } catch (error) {
+            console.error('Error saving attempts leaderboard:', error);
+        }
+    }
+    
+    addAttemptToLeaderboard(playerName, roundScore, throws, roundDuration) {
+        // Create unique attempt entry
+        const attempt = {
+            id: `attempt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            playerName: playerName,
+            date: new Date().toISOString(),
+            totalScore: roundScore,
+            throws: throws.map(throw_ => ({
+                score: throw_.score,
+                zone: throw_.scoringZone?.name || 'Miss',
+                distance: throw_.closestDistance
+            })),
+            duration: roundDuration,
+            targetPosition: this.sceneManager ? this.sceneManager.getTargetCenter() : null
+        };
+        
+        // Add to leaderboard
+        this.attemptsLeaderboard.push(attempt);
+        
+        // Keep only the best 1000 attempts to manage storage
+        if (this.attemptsLeaderboard.length > 1000) {
+            // Sort by score and keep top 1000
+            this.attemptsLeaderboard.sort((a, b) => b.totalScore - a.totalScore);
+            this.attemptsLeaderboard = this.attemptsLeaderboard.slice(0, 1000);
+        }
+        
+        this.saveAttemptsLeaderboard();
+        console.log(`Added attempt: ${playerName} - ${roundScore} points`);
+        
+        // Update the top attempts display
+        this.updateTopAttemptsDisplay();
+    }
+    
+    getLeaderboard(sortBy = 'totalScore', limit = 10) {
+        const sortedAttempts = [...this.attemptsLeaderboard].sort((a, b) => {
+            switch (sortBy) {
+                case 'totalScore':
+                    return b.totalScore - a.totalScore;
+                case 'date':
+                    return new Date(b.date) - new Date(a.date);
+                default:
+                    return b.totalScore - a.totalScore;
+            }
+        });
+        
+        return sortedAttempts.slice(0, limit);
+    }
+    
+    getBestAttemptForPlayer(playerName) {
+        const playerAttempts = this.attemptsLeaderboard.filter(
+            attempt => attempt.playerName.toLowerCase() === playerName.toLowerCase()
+        );
+        
+        if (playerAttempts.length === 0) return null;
+        
+        return playerAttempts.reduce((best, current) => 
+            current.totalScore > best.totalScore ? current : best
+        );
+    }
+    
+    getRecentAttempts(limit = 10) {
+        return this.getLeaderboard('date', limit);
+    }
+    
+    exportAttemptsLeaderboard() {
+        if (this.attemptsLeaderboard.length === 0) {
+            alert('No attempts to export.');
+            return;
+        }
+        
+        const exportData = {
+            exportDate: new Date().toISOString(),
+            totalAttempts: this.attemptsLeaderboard.length,
+            topAttempts: this.getLeaderboard('totalScore', 100),
+            recentAttempts: this.getRecentAttempts(50),
+            allAttempts: this.attemptsLeaderboard
+        };
+        
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(dataBlob);
+        link.download = `gerf-attempts-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        
+        console.log('Attempts leaderboard exported');
+    }
+    
+    clearAttemptsLeaderboard() {
+        if (confirm('Are you sure you want to clear all attempts data? This cannot be undone.')) {
+            this.attemptsLeaderboard = [];
+            this.saveAttemptsLeaderboard();
+            this.updateTopAttemptsDisplay();
+            console.log('Attempts leaderboard cleared');
+        }
+    }
+    
+    showLeaderboard() {
+        const topAttempts = this.getLeaderboard('totalScore', 10);
+        
+        if (topAttempts.length === 0) {
+            alert('No attempts recorded yet!');
+            return;
+        }
+        
+        let leaderboardText = '🏆 TOP 10 ATTEMPTS - BEST SCORES 🏆\n\n';
+        topAttempts.forEach((attempt, index) => {
+            const date = new Date(attempt.date).toLocaleDateString();
+            const throwScores = attempt.throws.map(t => t.score).join(' + ');
+            
+            leaderboardText += `${index + 1}. ${attempt.playerName} - ${attempt.totalScore} pts\n`;
+            leaderboardText += `   Throws: ${throwScores} | Date: ${date}\n`;
+            leaderboardText += `   Best zones: ${attempt.throws.map(t => t.zone).join(', ')}\n\n`;
+        });
+        
+        alert(leaderboardText);
+    }
+    
+    updateTopAttemptsDisplay() {
+        if (!this.topAttemptsContainer) return;
+        
+        const topAttempts = this.getLeaderboard('totalScore', 3);
+        
+        if (topAttempts.length === 0) {
+            this.topAttemptsContainer.innerHTML = '<p class="no-attempts">No attempts yet</p>';
+            return;
+        }
+        
+        const placementClasses = ['first-place', 'second-place', 'third-place'];
+        const medals = ['🥇', '🥈', '🥉'];
+        
+        const attemptsHTML = topAttempts.map((attempt, index) => {
+            const date = new Date(attempt.date).toLocaleDateString();
+            const throwScores = attempt.throws.map(t => t.score).join(' + ');
+            
+            return `
+                <div class="attempt-item ${placementClasses[index]}">
+                    <div class="attempt-info">
+                        <div class="attempt-player">${medals[index]} ${attempt.playerName}</div>
+                        <div class="attempt-score">${attempt.totalScore}</div>
+                    </div>
+                    <div class="attempt-details">${date}</div>
+                    <div class="attempt-throws">${throwScores}</div>
+                </div>
+            `;
+        }).join('');
+        
+        this.topAttemptsContainer.innerHTML = attemptsHTML;
     }
 } 

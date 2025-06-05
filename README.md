@@ -45,7 +45,7 @@ GERF-App/
 │   │   └── websocket-manager.js    # WebSocket connection handling
 │   └── models/
 │       ├── Paper Plane.glb         # 3D paper airplane model
-│       └── Dartboard.glb           # 3D dartboard model
+│       └── archery_targret.glb     # 3D archery target model
 ├── server/                          # Backend services
 │   ├── udp_test_server.py          # Test coordinate generator
 │   ├── websocket_bridge.py         # WebSocket bridge server

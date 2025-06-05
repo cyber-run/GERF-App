@@ -5,34 +5,32 @@ class SceneManager {
         this.camera = null;
         this.renderer = null;
         this.plane = null;
-        this.dartboard = null;
+        this.archeryTarget = null;
         this.starfield = null;
         
         // Plane movement tracking
         this.previousPlanePosition = null;
         
-        // Dartboard center calibration
-        this.dartboardBaseCenter = { x: -60, y: 80, z: 0 }; // From server config
-        this.dartboardOffset = { x: 0.5, y: -12, z: 0.0 }; // Calibrated offset for current model scale
-        this.dartboardCenterMarker = null;
-        this.showCenterMarker = true;
+        // Archery target center (fixed position - no offset needed)
+        this.targetCenter = { x: -60, y: 80, z: 60 };
         
-        // Load saved calibration if available
-        this.loadDartboardCalibration();
+        // Transform controls for target manipulation
+        this.transformControls = null;
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.isTransformActive = false;
         
-        // Mouse controls
-        this.mouseX = 0;
-        this.mouseY = 0;
-        this.isMouseDown = false;
-        this.cameraDistance = 200;
-        this.cameraHeight = 100;
-        this.cameraAngle = 0;
-        this.cameraVerticalAngle = 0;
+        // Camera controls
+        this.orbitControls = null;
         this.showStarfield = true;
         
-        // Mouse control sensitivity
-        this.mouseSensitivity = 0.005;
-        this.zoomSensitivity = 10;
+        // Trajectory tracking
+        this.trajectoryPoints = [];
+        this.trajectoryLine = null;
+        this.isTrackingTrajectory = false;
+        this.maxTrajectoryPoints = 100; // Limit trail length
+        this.trajectoryUpdateInterval = 50; // Update every 50ms
+        this.lastTrajectoryUpdate = 0;
         
         this.init();
     }
@@ -46,7 +44,8 @@ class SceneManager {
 
         // Camera
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this.updateCameraPosition();
+        this.camera.position.set(150, 100, 150); // Simple initial position
+        this.camera.lookAt(0, 0, 0);
 
         // Renderer
         this.renderer = new THREE.WebGLRenderer({ 
@@ -69,6 +68,22 @@ class SceneManager {
         directionalLight.shadow.mapSize.width = 2048;
         directionalLight.shadow.mapSize.height = 2048;
         this.scene.add(directionalLight);
+        
+        // Add spotlight focused on target area
+        this.targetSpotlight = new THREE.SpotLight(0xffffff, 1.5);
+        this.targetSpotlight.position.set(-20, 120, 100); // Position above and in front of target
+        this.targetSpotlight.angle = Math.PI / 6; // 30 degree cone
+        this.targetSpotlight.penumbra = 0.3; // Soft edges
+        this.targetSpotlight.decay = 1;
+        this.targetSpotlight.distance = 200;
+        this.targetSpotlight.castShadow = true;
+        this.targetSpotlight.shadow.mapSize.width = 1024;
+        this.targetSpotlight.shadow.mapSize.height = 1024;
+        this.scene.add(this.targetSpotlight);
+        
+        // Store lights for later updates
+        this.directionalLight = directionalLight;
+        this.ambientLight = ambientLight;
 
         // Load models
         this.loadModels();
@@ -81,14 +96,14 @@ class SceneManager {
         const gridHelper = new THREE.GridHelper(200, 20, 0x888888, 0x444444);
         this.scene.add(gridHelper);
 
-        // Initialize mouse controls
-        this.initializeMouseControls();
+        // Initialize simple orbit controls
+        this.initializeOrbitControls();
 
         // Initialize keyboard controls
         this.initializeKeyboardControls();
 
-        // Create dartboard center marker by default
-        this.createDartboardCenterMarker();
+        // Initialize transform controls for target manipulation
+        this.initializeTransformControls();
 
         // Start render loop
         this.animate();
@@ -117,67 +132,10 @@ class SceneManager {
         this.scene.add(this.starfield);
     }
     
-    initializeMouseControls() {
-        const canvas = this.renderer.domElement;
-        
-        // Mouse move for camera rotation
-        canvas.addEventListener('mousemove', (event) => {
-            if (this.isMouseDown) {
-                const deltaX = event.clientX - this.mouseX;
-                const deltaY = event.clientY - this.mouseY;
-                
-                this.cameraAngle -= deltaX * this.mouseSensitivity;
-                this.cameraVerticalAngle -= deltaY * this.mouseSensitivity;
-                
-                // Clamp vertical angle
-                this.cameraVerticalAngle = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, this.cameraVerticalAngle));
-                
-                this.updateCameraPosition();
-            }
-            
-            this.mouseX = event.clientX;
-            this.mouseY = event.clientY;
-        });
-        
-        // Mouse down/up for drag control
-        canvas.addEventListener('mousedown', (event) => {
-            this.isMouseDown = true;
-            this.mouseX = event.clientX;
-            this.mouseY = event.clientY;
-            canvas.style.cursor = 'grabbing';
-        });
-        
-        canvas.addEventListener('mouseup', () => {
-            this.isMouseDown = false;
-            canvas.style.cursor = 'grab';
-        });
-        
-        canvas.addEventListener('mouseleave', () => {
-            this.isMouseDown = false;
-            canvas.style.cursor = 'grab';
-        });
-        
-        // Mouse wheel for zoom
-        canvas.addEventListener('wheel', (event) => {
-            event.preventDefault();
-            this.cameraDistance += event.deltaY * this.zoomSensitivity * 0.1;
-            this.cameraDistance = Math.max(50, Math.min(500, this.cameraDistance));
-            this.updateCameraPosition();
-        });
-        
-        // Set initial cursor
-        canvas.style.cursor = 'grab';
-    }
-    
-    updateCameraPosition() {
-        if (this.camera) {
-            const x = Math.cos(this.cameraAngle) * Math.cos(this.cameraVerticalAngle) * this.cameraDistance;
-            const y = this.cameraHeight + Math.sin(this.cameraVerticalAngle) * this.cameraDistance;
-            const z = Math.sin(this.cameraAngle) * Math.cos(this.cameraVerticalAngle) * this.cameraDistance;
-            
-            this.camera.position.set(x, y, z);
-            this.camera.lookAt(0, 0, 0);
-        }
+    initializeOrbitControls() {
+        this.orbitControls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+        this.orbitControls.enableDamping = true;
+        this.orbitControls.dampingFactor = 0.25;
     }
     
     loadModels() {
@@ -195,17 +153,29 @@ class SceneManager {
             console.error('Error loading paper plane:', error);
         });
 
-        // Load dartboard
-        loader.load('models/Dartboard.glb', (gltf) => {
-            this.dartboard = gltf.scene;
-            this.dartboard.scale.set(15, 15, 15);
-            this.dartboard.position.set(-60, 80, 0);
-            this.dartboard.castShadow = true;
-            this.dartboard.receiveShadow = true;
-            this.scene.add(this.dartboard);
-            console.log('Dartboard loaded successfully');
+        // Load archery target
+        loader.load('models/archery_targret.glb', (gltf) => {
+            this.archeryTarget = gltf.scene;
+            this.archeryTarget.scale.set(10, 10, 10);
+            this.archeryTarget.position.set(-60, 80, 60);
+            // Rotate 90 degrees around Y-axis (green axis)
+            this.archeryTarget.rotation.set(0, Math.PI/2, 0);
+            this.archeryTarget.castShadow = true;
+            this.archeryTarget.receiveShadow = true;
+            
+            this.scene.add(this.archeryTarget);
+            
+            // Load saved target settings if they exist
+            if (!this.loadTargetSettings()) {
+                console.log('No saved target settings found, using defaults');
+            }
+            
+            // Update lighting to focus on target
+            this.updateTargetLighting();
+            
+            console.log('Archery target loaded successfully');
         }, undefined, (error) => {
-            console.error('Error loading dartboard:', error);
+            console.error('Error loading archery target:', error);
         });
     }
     
@@ -238,6 +208,9 @@ class SceneManager {
             // Update plane position
             this.plane.position.copy(newPosition);
             
+            // Add point to trajectory if tracking
+            this.addTrajectoryPoint(newPosition);
+            
             // Store current position as previous for next update
             this.previousPlanePosition = newPosition.clone();
         }
@@ -245,6 +218,11 @@ class SceneManager {
     
     animate() {
         requestAnimationFrame(() => this.animate());
+        
+        // Update orbit controls
+        if (this.orbitControls) {
+            this.orbitControls.update();
+        }
         
         // Rotate starfield slowly
         if (this.starfield && this.showStarfield) {
@@ -281,7 +259,7 @@ class SceneManager {
         // Add pulsing animation
         this.animateClosestPointMarker();
         
-        // Create a line from the closest point to the dartboard center
+        // Create a line from the closest point to the target center
         this.createDistanceLine(point);
         
         console.log(`Highlighted closest point at (${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)}) - ${scoringZone.name}`);
@@ -332,12 +310,12 @@ class SceneManager {
     }
     
     createDistanceLine(point) {
-        const dartboardCenter = new THREE.Vector3();
-        const center = this.getDartboardCenter();
-        dartboardCenter.set(center.x, center.y, center.z);
+        const targetCenter = new THREE.Vector3();
+        const center = this.getTargetCenter();
+        targetCenter.set(center.x, center.y, center.z);
         const closestPoint = new THREE.Vector3(point.x, point.y, point.z);
         
-        const geometry = new THREE.BufferGeometry().setFromPoints([closestPoint, dartboardCenter]);
+        const geometry = new THREE.BufferGeometry().setFromPoints([closestPoint, targetCenter]);
         const material = new THREE.LineBasicMaterial({
             color: 0xffffff,
             transparent: true,
@@ -353,12 +331,15 @@ class SceneManager {
         // Remove existing indicators
         this.removeScoringZoneIndicators();
         
-        const center = this.getDartboardCenter();
-        const dartboardCenter = new THREE.Vector3(center.x, center.y, center.z);
+        // Position zones relative to target's local coordinate system (0,0,0)
+        const localCenter = new THREE.Vector3(0, 0, 0.2); // Forward in target's local Z direction
+        
         const scoringZones = [
-            { name: 'Bullseye', radius: 2, color: 0xFFD700, opacity: 0.3 },
-            { name: 'Inner Ring', radius: 5, color: 0xFF6B6B, opacity: 0.2 },
-            { name: 'Outer Ring', radius: 10, color: 0x4ECDC4, opacity: 0.15 }
+            { name: 'Bullseye', radius: 0.3, color: 0xFFD700, opacity: 0.9 },
+            { name: 'Inner Ring', radius: 0.7, color: 0xFF6B6B, opacity: 0.8 },
+            { name: 'Outer Ring', radius: 1.2, color: 0x4ECDC4, opacity: 0.7 },
+            { name: 'Outer Ring 2', radius: 1.8, color: 0x9B59B6, opacity: 0.6 },
+            { name: 'Outer Ring 3', radius: 2.5, color: 0x34495E, opacity: 0.5 }
         ];
         
         this.scoringZoneIndicators = [];
@@ -375,26 +356,26 @@ class SceneManager {
                 color: zone.color,
                 transparent: true,
                 opacity: zone.opacity,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                depthTest: false // Disable depth testing to ensure visibility
             });
             
             const ring = new THREE.Mesh(geometry, material);
-            ring.position.copy(dartboardCenter);
-            // Orient the ring to face the dartboard (vertical, facing forward)
-            // Rotate 90 degrees around Y-axis (vertical up axis) to align with dartboard
-            ring.rotateY(Math.PI / 2);
+            ring.position.copy(localCenter);
+            // No additional rotation needed - rings inherit target's rotation as child objects
             
-            this.scene.add(ring);
+            // Add as child of target instead of scene - this locks them together!
+            this.archeryTarget.add(ring);
             this.scoringZoneIndicators.push(ring);
         });
         
-        console.log('Scoring zone indicators created');
+        console.log('Scoring zone indicators created (attached to target, will move together)');
     }
     
     removeScoringZoneIndicators() {
-        if (this.scoringZoneIndicators) {
+        if (this.scoringZoneIndicators && this.archeryTarget) {
             this.scoringZoneIndicators.forEach(indicator => {
-                this.scene.remove(indicator);
+                this.archeryTarget.remove(indicator);
             });
             this.scoringZoneIndicators = [];
         }
@@ -412,24 +393,6 @@ class SceneManager {
     initializeKeyboardControls() {
         document.addEventListener('keydown', (event) => {
             switch(event.key.toLowerCase()) {
-                case 'r':
-                    if (!event.ctrlKey && !event.metaKey) {
-                        // Reset camera position
-                        this.cameraAngle = 0;
-                        this.cameraVerticalAngle = 0;
-                        this.cameraDistance = 200;
-                        this.updateCameraPosition();
-                        console.log('Camera position reset');
-                    }
-                    break;
-                case 's':
-                    if (!event.ctrlKey && !event.metaKey) {
-                        // Toggle starfield
-                        this.showStarfield = !this.showStarfield;
-                        this.starfield.visible = this.showStarfield;
-                        console.log(`Starfield ${this.showStarfield ? 'enabled' : 'disabled'}`);
-                    }
-                    break;
                 case 'z':
                     // Toggle scoring zone indicators
                     this.toggleScoringZoneIndicators();
@@ -440,249 +403,377 @@ class SceneManager {
                     this.removeScoringZoneIndicators();
                     console.log('Visual indicators cleared');
                     break;
-                case 'm':
-                    // Toggle dartboard center marker
-                    this.toggleDartboardCenterMarker();
+                case 'v':
+                    // Toggle trajectory tracking manually
+                    if (this.isTrackingTrajectory) {
+                        this.stopTrajectoryTracking();
+                    } else {
+                        this.startTrajectoryTracking();
+                    }
                     break;
-                case 'arrowup':
-                    // Adjust Y offset up
-                    this.adjustDartboardOffset('y', 0.5);
+                case 'c':
+                    // Clear trajectory
+                    if (!event.ctrlKey && !event.metaKey) {
+                        this.clearTrajectory();
+                    }
                     break;
-                case 'arrowdown':
-                    // Adjust Y offset down
-                    this.adjustDartboardOffset('y', -0.5);
+                case 'l':
+                    // Show leaderboard
+                    if (!event.ctrlKey && !event.metaKey) {
+                        // Call leaderboard through the throw manager
+                        if (window.throwManager && window.throwManager.showLeaderboard) {
+                            window.throwManager.showLeaderboard();
+                        }
+                    }
                     break;
-                case 'arrowleft':
-                    // Adjust X offset left
-                    this.adjustDartboardOffset('x', -0.5);
-                    break;
-                case 'arrowright':
-                    // Adjust X offset right
-                    this.adjustDartboardOffset('x', 0.5);
-                    break;
-                case ',':
-                    // Adjust Z offset backward
-                    this.adjustDartboardOffset('z', -0.5);
-                    break;
-                case '.':
-                    // Adjust Z offset forward
-                    this.adjustDartboardOffset('z', 0.5);
-                    break;
-                case '0':
-                    // Reset dartboard offset
-                    this.resetDartboardOffset();
-                    break;
-                case 'enter':
-                    // Save current calibration
-                    this.saveDartboardCalibration();
-                    break;
+                case 'delete':
                 case 'backspace':
-                    // Clear saved calibration and reset to default
-                    this.clearDartboardCalibration();
-                    this.resetDartboardOffset();
+                    // Reset target settings to defaults
+                    if (this.transformControls.object) {
+                        this.resetTargetSettings();
+                    }
+                    break;
+                case 't':
+                    if (!event.ctrlKey && !event.metaKey) {
+                        // Switch to translate mode
+                        if (this.transformControls.object) {
+                            this.transformControls.setMode('translate');
+                            console.log('Transform mode: Translate');
+                        }
+                    }
+                    break;
+                case 'r':
+                    if (!event.ctrlKey && !event.metaKey) {
+                        // Switch to rotate mode or reset camera if no object selected
+                        if (this.transformControls.object) {
+                            this.transformControls.setMode('rotate');
+                            console.log('Transform mode: Rotate');
+                        } else {
+                            // Reset camera position (existing functionality)
+                            this.camera.position.set(150, 100, 150);
+                            this.camera.lookAt(0, 0, 0);
+                            if (this.orbitControls) {
+                                this.orbitControls.reset();
+                            }
+                            console.log('Camera position reset');
+                        }
+                    }
+                    break;
+                case 's':
+                    if (!event.ctrlKey && !event.metaKey) {
+                        // Switch to scale mode or toggle starfield if no object selected
+                        if (this.transformControls.object) {
+                            this.transformControls.setMode('scale');
+                            console.log('Transform mode: Scale (uniform)');
+                        } else {
+                            // Toggle starfield (existing functionality)
+                            this.showStarfield = !this.showStarfield;
+                            this.starfield.visible = this.showStarfield;
+                            console.log(`Starfield ${this.showStarfield ? 'enabled' : 'disabled'}`);
+                        }
+                    }
                     break;
             }
         });
     }
     
-    // Dartboard center calibration methods
-    getDartboardCenter() {
+    // Archery target center calibration methods
+    getTargetCenter() {
         return {
-            x: this.dartboardBaseCenter.x + this.dartboardOffset.x,
-            y: this.dartboardBaseCenter.y + this.dartboardOffset.y,
-            z: this.dartboardBaseCenter.z + this.dartboardOffset.z
+            x: this.targetCenter.x,
+            y: this.targetCenter.y,
+            z: this.targetCenter.z
         };
     }
     
-    createDartboardCenterMarker() {
-        // Remove existing marker
-        this.removeDartboardCenterMarker();
+    // Target settings persistence methods
+    saveTargetSettings() {
+        if (!this.archeryTarget) return;
         
-        const center = this.getDartboardCenter();
+        const settings = {
+            position: {
+                x: this.archeryTarget.position.x,
+                y: this.archeryTarget.position.y,
+                z: this.archeryTarget.position.z
+            },
+            rotation: {
+                x: this.archeryTarget.rotation.x,
+                y: this.archeryTarget.rotation.y,
+                z: this.archeryTarget.rotation.z
+            },
+            scale: {
+                x: this.archeryTarget.scale.x,
+                y: this.archeryTarget.scale.y,
+                z: this.archeryTarget.scale.z
+            },
+            targetCenter: {
+                x: this.targetCenter.x,
+                y: this.targetCenter.y,
+                z: this.targetCenter.z
+            }
+        };
         
-        // Create a distinctive marker - red sphere with wireframe
-        const geometry = new THREE.SphereGeometry(1, 16, 16);
-        const material = new THREE.MeshBasicMaterial({
-            color: 0xff0000,
+        localStorage.setItem('gerf-target-settings', JSON.stringify(settings));
+        console.log('Target settings saved automatically');
+    }
+    
+    // Update lighting to focus on target
+    updateTargetLighting() {
+        if (!this.archeryTarget || !this.targetSpotlight) return;
+        
+        const targetPos = this.archeryTarget.position;
+        
+        // Update spotlight target
+        this.targetSpotlight.target.position.copy(targetPos);
+        this.targetSpotlight.target.updateMatrixWorld();
+        
+        // Update directional light to illuminate from above and slightly behind
+        const offset = new THREE.Vector3(40, 60, -30);
+        this.directionalLight.position.copy(targetPos).add(offset);
+        this.directionalLight.target.position.copy(targetPos);
+        this.directionalLight.target.updateMatrixWorld();
+        
+        console.log('Lighting updated to focus on target');
+    }
+    
+    loadTargetSettings() {
+        const savedSettings = localStorage.getItem('gerf-target-settings');
+        if (!savedSettings || !this.archeryTarget) return false;
+        
+        try {
+            const settings = JSON.parse(savedSettings);
+            
+            // Apply position
+            this.archeryTarget.position.set(
+                settings.position.x,
+                settings.position.y,
+                settings.position.z
+            );
+            
+            // Apply rotation
+            this.archeryTarget.rotation.set(
+                settings.rotation.x,
+                settings.rotation.y,
+                settings.rotation.z
+            );
+            
+            // Apply scale
+            this.archeryTarget.scale.set(
+                settings.scale.x,
+                settings.scale.y,
+                settings.scale.z
+            );
+            
+            // Update target center
+            this.targetCenter.x = settings.targetCenter.x;
+            this.targetCenter.y = settings.targetCenter.y;
+            this.targetCenter.z = settings.targetCenter.z;
+            
+            // Update lighting to focus on new target position
+            this.updateTargetLighting();
+            
+            console.log('Target settings loaded from previous session');
+            return true;
+        } catch (error) {
+            console.warn('Failed to load target settings:', error);
+            return false;
+        }
+    }
+    
+    resetTargetSettings() {
+        if (!this.archeryTarget) return;
+        
+        // Reset to default values
+        this.archeryTarget.position.set(-60, 80, 60);
+        this.archeryTarget.rotation.set(0, Math.PI/2, 0);
+        this.archeryTarget.scale.set(10, 10, 10);
+        
+        // Update target center
+        this.targetCenter.x = -60;
+        this.targetCenter.y = 80;
+        this.targetCenter.z = 60;
+        
+        // Update lighting to focus on reset position
+        this.updateTargetLighting();
+        
+        // Save the reset settings
+        this.saveTargetSettings();
+        console.log('Target settings reset to defaults');
+    }
+    
+    // Initialize transform controls for target manipulation
+    initializeTransformControls() {
+        this.transformControls = new THREE.TransformControls(this.camera, this.renderer.domElement);
+        this.scene.add(this.transformControls);
+        
+        // Set to local space so arrows follow object orientation
+        this.transformControls.setSpace('local');
+        
+        // Disable orbit controls when transforming
+        this.transformControls.addEventListener('dragging-changed', (event) => {
+            this.isTransformActive = event.value;
+            if (this.orbitControls) {
+                this.orbitControls.enabled = !event.value;
+            }
+        });
+        
+        // Handle object changes - enforce uniform scaling and update target center
+        this.transformControls.addEventListener('objectChange', () => {
+            if (this.archeryTarget && this.transformControls.object === this.archeryTarget) {
+                // Enforce uniform scaling when in scale mode
+                if (this.transformControls.mode === 'scale') {
+                    const scale = this.archeryTarget.scale;
+                    const maxScale = Math.max(scale.x, scale.y, scale.z);
+                    scale.setScalar(maxScale);
+                }
+                
+                // Update target center when position changes
+                if (this.transformControls.mode === 'translate') {
+                    this.targetCenter.x = this.archeryTarget.position.x;
+                    this.targetCenter.y = this.archeryTarget.position.y;
+                    this.targetCenter.z = this.archeryTarget.position.z;
+                    
+                    // Update lighting to follow target
+                    this.updateTargetLighting();
+                }
+                
+                // Auto-save settings after any transformation
+                this.saveTargetSettings();
+            }
+        });
+        
+        // Click handling for target selection
+        this.renderer.domElement.addEventListener('click', (event) => {
+            if (this.isTransformActive) return;
+            
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            
+            if (this.archeryTarget) {
+                const intersects = this.raycaster.intersectObject(this.archeryTarget, true);
+                
+                if (intersects.length > 0) {
+                    this.transformControls.attach(this.archeryTarget);
+                    console.log('Target selected - use T/R/S keys to switch transform modes, or click elsewhere to deselect');
+                    console.log('Transform space: LOCAL (controls follow object orientation)');
+                } else {
+                    this.transformControls.detach();
+                }
+            }
+        });
+    }
+    
+    // Trajectory tracking methods
+    startTrajectoryTracking() {
+        this.isTrackingTrajectory = true;
+        this.trajectoryPoints = [];
+        this.lastTrajectoryUpdate = Date.now();
+        this.removeTrajectoryLine();
+        console.log('Trajectory tracking started');
+    }
+    
+    stopTrajectoryTracking() {
+        this.isTrackingTrajectory = false;
+        console.log('Trajectory tracking stopped');
+    }
+    
+    clearTrajectory() {
+        this.trajectoryPoints = [];
+        this.removeTrajectoryLine();
+        console.log('Trajectory cleared');
+    }
+    
+    addTrajectoryPoint(position) {
+        if (!this.isTrackingTrajectory) return;
+        
+        const now = Date.now();
+        if (now - this.lastTrajectoryUpdate < this.trajectoryUpdateInterval) return;
+        
+        this.trajectoryPoints.push(position.clone());
+        
+        // Limit trajectory length
+        if (this.trajectoryPoints.length > this.maxTrajectoryPoints) {
+            this.trajectoryPoints.shift();
+        }
+        
+        this.updateTrajectoryLine();
+        this.lastTrajectoryUpdate = now;
+    }
+    
+    updateTrajectoryLine() {
+        if (this.trajectoryPoints.length < 2) return;
+        
+        // Remove existing line
+        this.removeTrajectoryLine();
+        
+        // Create dotted line geometry
+        const geometry = new THREE.BufferGeometry().setFromPoints(this.trajectoryPoints);
+        
+        // Create dashed line material
+        const material = new THREE.LineDashedMaterial({
+            color: 0x00ff88,
+            linewidth: 3,
+            scale: 1,
+            dashSize: 3,
+            gapSize: 2,
             transparent: true,
             opacity: 0.8
         });
         
-        this.dartboardCenterMarker = new THREE.Mesh(geometry, material);
-        this.dartboardCenterMarker.position.set(center.x, center.y, center.z);
-        
-        // Add wireframe overlay
-        const wireframeGeometry = new THREE.SphereGeometry(1.2, 16, 16);
-        const wireframeMaterial = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            wireframe: true,
-            transparent: true,
-            opacity: 0.6
-        });
-        
-        const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-        wireframe.position.set(center.x, center.y, center.z);
-        
-        // Group them together
-        const markerGroup = new THREE.Group();
-        markerGroup.add(this.dartboardCenterMarker);
-        markerGroup.add(wireframe);
-        
-        this.scene.add(markerGroup);
-        this.dartboardCenterMarker = markerGroup; // Store the group
-        
-        console.log(`Dartboard center marker created at (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+        this.trajectoryLine = new THREE.Line(geometry, material);
+        this.trajectoryLine.computeLineDistances(); // Required for dashed lines
+        this.scene.add(this.trajectoryLine);
     }
     
-    removeDartboardCenterMarker() {
-        if (this.dartboardCenterMarker) {
-            this.scene.remove(this.dartboardCenterMarker);
-            this.dartboardCenterMarker = null;
+    removeTrajectoryLine() {
+        if (this.trajectoryLine) {
+            this.scene.remove(this.trajectoryLine);
+            this.trajectoryLine.geometry.dispose();
+            this.trajectoryLine.material.dispose();
+            this.trajectoryLine = null;
         }
     }
     
-    toggleDartboardCenterMarker() {
-        this.showCenterMarker = !this.showCenterMarker;
-        
-        if (this.showCenterMarker) {
-            this.createDartboardCenterMarker();
-            console.log('Dartboard center marker enabled');
-        } else {
-            this.removeDartboardCenterMarker();
-            console.log('Dartboard center marker disabled');
-        }
+    // Public methods for throw integration
+    startThrowTrajectory() {
+        this.startTrajectoryTracking();
     }
     
-    adjustDartboardOffset(axis, amount) {
-        this.dartboardOffset[axis] += amount;
-        
-        // Update marker position if visible
-        if (this.showCenterMarker && this.dartboardCenterMarker) {
-            const center = this.getDartboardCenter();
-            this.dartboardCenterMarker.position.set(center.x, center.y, center.z);
-        }
-        
-        // Update scoring zone indicators if visible
-        if (this.scoringZoneIndicators && this.scoringZoneIndicators.length > 0) {
-            this.createScoringZoneIndicators();
-        }
-        
-        console.log(`Dartboard offset adjusted: ${axis} ${amount > 0 ? '+' : ''}${amount.toFixed(1)}`);
-        console.log(`Current offset: (${this.dartboardOffset.x.toFixed(1)}, ${this.dartboardOffset.y.toFixed(1)}, ${this.dartboardOffset.z.toFixed(1)})`);
-        console.log(`Effective center: (${this.getDartboardCenter().x.toFixed(2)}, ${this.getDartboardCenter().y.toFixed(2)}, ${this.getDartboardCenter().z.toFixed(2)})`);
-    }
-    
-    resetDartboardOffset() {
-        this.dartboardOffset = { x: -0.5, y: -0.5, z: 0.0 };
-        
-        // Update marker position if visible
-        if (this.showCenterMarker && this.dartboardCenterMarker) {
-            const center = this.getDartboardCenter();
-            this.dartboardCenterMarker.position.set(center.x, center.y, center.z);
-        }
-        
-        // Update scoring zone indicators if visible
-        if (this.scoringZoneIndicators && this.scoringZoneIndicators.length > 0) {
-            this.createScoringZoneIndicators();
-        }
-        
-        console.log('Dartboard offset reset to (-0.5, -0.5, 0.0)');
-        console.log(`Base center: (${this.dartboardBaseCenter.x}, ${this.dartboardBaseCenter.y}, ${this.dartboardBaseCenter.z})`);
-    }
-    
-    // Method to get current offset values for external use
-    getDartboardOffsetValues() {
-        return {
-            offset: { ...this.dartboardOffset },
-            effectiveCenter: this.getDartboardCenter(),
-            baseCenter: { ...this.dartboardBaseCenter }
-        };
-    }
-    
-    // Calibration persistence methods
-    saveDartboardCalibration() {
-        try {
-            const calibrationData = {
-                offset: { ...this.dartboardOffset },
-                baseCenter: { ...this.dartboardBaseCenter },
-                savedAt: new Date().toISOString(),
-                version: '1.0'
-            };
-            
-            localStorage.setItem('gerf-dartboard-calibration', JSON.stringify(calibrationData));
-            console.log('Dartboard calibration saved to localStorage');
-            console.log(`Saved offset: (${this.dartboardOffset.x}, ${this.dartboardOffset.y}, ${this.dartboardOffset.z})`);
-            
-            // Show temporary notification
-            this.showCalibrationNotification('Calibration Saved!', '#4CAF50');
-            
-        } catch (error) {
-            console.error('Error saving dartboard calibration:', error);
-            this.showCalibrationNotification('Save Failed!', '#f44336');
-        }
-    }
-    
-    loadDartboardCalibration() {
-        try {
-            const savedCalibration = localStorage.getItem('gerf-dartboard-calibration');
-            if (savedCalibration) {
-                const calibrationData = JSON.parse(savedCalibration);
-                
-                // Validate the data structure
-                if (calibrationData.offset && typeof calibrationData.offset === 'object') {
-                    this.dartboardOffset = { ...calibrationData.offset };
-                    console.log('Dartboard calibration loaded from localStorage');
-                    console.log(`Loaded offset: (${this.dartboardOffset.x}, ${this.dartboardOffset.y}, ${this.dartboardOffset.z})`);
-                    console.log(`Effective center: (${this.getDartboardCenter().x.toFixed(2)}, ${this.getDartboardCenter().y.toFixed(2)}, ${this.getDartboardCenter().z.toFixed(2)})`);
-                } else {
-                    console.log('Invalid calibration data found, using default values');
-                }
-            } else {
-                console.log('No saved calibration found, using default calibrated values');
-            }
-        } catch (error) {
-            console.error('Error loading dartboard calibration:', error);
-            console.log('Using default calibrated values');
-        }
-    }
-    
-    clearDartboardCalibration() {
-        try {
-            localStorage.removeItem('gerf-dartboard-calibration');
-            console.log('Saved dartboard calibration cleared');
-            this.showCalibrationNotification('Calibration Cleared!', '#FF9800');
-        } catch (error) {
-            console.error('Error clearing dartboard calibration:', error);
-        }
-    }
-    
-    showCalibrationNotification(message, color) {
-        // Create temporary notification
-        const notification = document.createElement('div');
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 50%;
-            transform: translateX(50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: ${color};
-            padding: 10px 20px;
-            border-radius: 5px;
-            font-size: 14px;
-            font-weight: bold;
-            z-index: 1001;
-            border: 1px solid ${color};
-            backdrop-filter: blur(10px);
-        `;
-        notification.textContent = message;
-        
-        document.body.appendChild(notification);
-        
-        // Remove after 2 seconds
+    endThrowTrajectory() {
+        this.stopTrajectoryTracking();
+        // Keep trajectory visible for a few seconds after throw ends
         setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
+            if (!this.isTrackingTrajectory) {
+                this.clearTrajectory();
             }
-        }, 2000);
+        }, 5000); // Clear after 5 seconds
+    }
+
+    // Download current target position as JSON for server use
+    downloadTargetPosition() {
+        const targetData = {
+            target_position: {
+                x: this.targetCenter.x,
+                y: this.targetCenter.y,
+                z: this.targetCenter.z
+            },
+            exported_at: new Date().toISOString(),
+            coordinate_system: "GERF_world_coordinates",
+            notes: "Target center position for linear trajectory - place in server directory"
+        };
+
+        const dataStr = JSON.stringify(targetData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(dataBlob);
+        link.download = 'target_position.json';
+        link.click();
+        
+        console.log('Target position downloaded:', targetData.target_position);
+        console.log('Place target_position.json in server directory to use custom target location');
     }
 } 
