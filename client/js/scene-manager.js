@@ -449,6 +449,20 @@ class SceneManager {
                         this.resetTargetSettings();
                     }
                     break;
+                case 'o':
+                    if (event.ctrlKey && event.shiftKey) {
+                        // Move target to origin (0, 0, 0)
+                        event.preventDefault();
+                        this.moveTargetToOrigin();
+                    }
+                    break;
+                case 'k':
+                    if (event.ctrlKey || event.metaKey) {
+                        // Show keybind help
+                        event.preventDefault();
+                        this.showKeybindHelp();
+                    }
+                    break;
                 case 't':
                     if (!event.ctrlKey && !event.metaKey) {
                         // Switch to translate mode
@@ -655,6 +669,137 @@ class SceneManager {
         console.log('Target settings reset to defaults');
     }
     
+    moveTargetToOrigin() {
+        if (!this.archeryTarget) return;
+        
+        // Move target to origin while preserving rotation and scale
+        this.archeryTarget.position.set(0, 0, 0);
+        
+        // Update target center to origin
+        this.targetCenter.x = 0;
+        this.targetCenter.y = 0;
+        this.targetCenter.z = 0;
+        
+        // Update lighting to focus on new position
+        this.updateTargetLighting();
+        
+        // Save the new settings
+        this.saveTargetSettings();
+        console.log('Target moved to origin (0, 0, 0) - press R to reset camera view');
+    }
+    
+    showKeybindHelp() {
+        // Remove existing help modal if present
+        this.hideKeybindHelp();
+        
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'keybind-help-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        `;
+        
+        // Create modal content
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: #1a1a1a;
+            border: 2px solid #444;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            color: #fff;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        `;
+        
+        modal.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #4ECDC4; font-size: 24px;">🎯 GERF-App Keybinds</h2>
+                <button id="close-help" style="background: #ff4757; border: none; color: white; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;">✕ Close</button>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div>
+                    <h3 style="color: #FFD700; margin-bottom: 15px; border-bottom: 2px solid #333; padding-bottom: 8px;">🎮 Transform Controls</h3>
+                    <div style="line-height: 1.8;">
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Click Target</kbd> → Select/Deselect</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">T</kbd> → Translate Mode</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">R</kbd> → Rotate Mode / Reset Camera</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">S</kbd> → Scale Mode / Toggle Starfield</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Del/Backspace</kbd> → Reset Target Settings</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+Shift+O</kbd> → Move to Origin</div>
+                    </div>
+                    
+                    <h3 style="color: #FFD700; margin: 25px 0 15px 0; border-bottom: 2px solid #333; padding-bottom: 8px;">🎯 Scoring & Display</h3>
+                    <div style="line-height: 1.8;">
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Z</kbd> → Toggle Scoring Zones</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+K</kbd> → Show This Help</div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 style="color: #9B59B6; margin-bottom: 15px; border-bottom: 2px solid #333; padding-bottom: 8px;">📊 Session Management</h3>
+                    <div style="line-height: 1.8;">
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+C</kbd> → Clear Round History</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+F</kbd> → Force End Throw</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+R</kbd> → Force End Round</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+P</kbd> → Export Leaderboard</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+G</kbd> → Download Target Position</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+E</kbd> → Export Filter Config</div>
+                    </div>
+                    
+                    <h3 style="color: #9B59B6; margin: 25px 0 15px 0; border-bottom: 2px solid #333; padding-bottom: 8px;">🔧 Filter Tuning</h3>
+                    <div style="line-height: 1.8;">
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Alt+Q/W</kbd> → Adjust Smoothness</div>
+                        <div><kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Alt+A/S</kbd> → Adjust Responsiveness</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 25px; padding-top: 20px; border-top: 2px solid #333; text-align: center; color: #888;">
+                <p style="margin: 0;">Press <kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Ctrl+K</kbd> anytime to show this help, or <kbd style="background: #333; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Esc</kbd> to close</p>
+            </div>
+        `;
+        
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        
+        // Add event listeners
+        document.getElementById('close-help').addEventListener('click', () => this.hideKeybindHelp());
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.hideKeybindHelp();
+        });
+        
+        // Add escape key listener
+        const escapeHandler = (e) => {
+            if (e.key === 'Escape') {
+                this.hideKeybindHelp();
+                document.removeEventListener('keydown', escapeHandler);
+            }
+        };
+        document.addEventListener('keydown', escapeHandler);
+        
+        console.log('Keybind help displayed - press Esc or click outside to close');
+    }
+    
+    hideKeybindHelp() {
+        const existing = document.getElementById('keybind-help-overlay');
+        if (existing) {
+            existing.remove();
+        }
+    }
+    
     // Initialize transform controls for target manipulation
     initializeTransformControls() {
         this.transformControls = new THREE.TransformControls(this.camera, this.renderer.domElement);
@@ -736,17 +881,17 @@ class SceneManager {
                     console.log(`Target scale updated: ${newUniformScale.toFixed(2)}x (ratio: ${targetRatio.toFixed(3)})`);
                 }
                 
-                // Update target center when position changes
+                // Update target center when position changes (but don't auto-reposition camera during translation)
                 if (this.transformControls.mode === 'translate') {
                     this.targetCenter.x = this.archeryTarget.position.x;
                     this.targetCenter.y = this.archeryTarget.position.y;
                     this.targetCenter.z = this.archeryTarget.position.z;
                     
-                    // Update lighting to follow target
+                    // Update lighting to follow target (keep this for visual feedback)
                     this.updateTargetLighting();
                     
-                    // Update camera to follow target position
-                    this.updateCameraToTargetView();
+                    // REMOVED: updateCameraToTargetView() - no longer auto-repositions camera during translation
+                    // Camera now only repositions on startup or when 'r' key is pressed
                 }
                 
                 // Auto-save settings after any transformation
