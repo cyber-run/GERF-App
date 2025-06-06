@@ -69,13 +69,13 @@ class DartDataAdapter:
             # Allow multiple receivers to bind to the same port and receive broadcasts
             self.dart_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # Try to enable port reuse for multiple listeners (macOS/Linux)
-            try:
-                self.dart_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-                logger.info("SO_REUSEPORT enabled - multiple listeners can share the port")
-            except AttributeError:
-                logger.warning("SO_REUSEPORT not available on this system")
-            except OSError as e:
-                logger.warning(f"SO_REUSEPORT failed: {e}")
+            # try:
+            #     self.dart_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            #     logger.info("SO_REUSEPORT enabled - multiple listeners can share the port")
+            # except AttributeError:
+            #     logger.warning("SO_REUSEPORT not available on this system")
+            # except OSError as e:
+            #     logger.warning(f"SO_REUSEPORT failed: {e}")
             # Bind to all interfaces to receive broadcast data
             self.dart_socket.bind(('', self.dart_udp_port))
             self.dart_socket.settimeout(1.0)
@@ -171,6 +171,10 @@ class DartDataAdapter:
             # Validate expected visual tracking format
             if 'point_3d' in json_data and 'timestamp' in json_data:
                 point_3d = json_data['point_3d']
+
+                # flip sign on x and y coordinates
+                point_3d[0] = -point_3d[0]
+                point_3d[1] = -point_3d[1]
                 
                 # Ensure point_3d is a list/array with 3 elements
                 if isinstance(point_3d, (list, tuple)) and len(point_3d) >= 3:

@@ -39,17 +39,17 @@ class WebSocketManager {
                     // Update coordinate display
                     this.updateCoordinateDisplay(data);
                     
-                    // Update 3D visualization
-                    this.sceneManager.updatePlanePosition(data);
+                    // Add to throw tracking first (this now handles filtered 3D visualization)
+                    if (this.throwManager) {
+                        this.throwManager.addCoordinate(data);
+                    } else {
+                        // Fallback: Update 3D visualization directly if no throw manager
+                        this.sceneManager.updatePlanePosition(data);
+                    }
                     
                     // Add to recording if recording manager is active
                     if (this.recordingManager) {
                         this.recordingManager.addCoordinate(data);
-                    }
-                    
-                    // Add to throw tracking if throw manager is available
-                    if (this.throwManager) {
-                        this.throwManager.addCoordinate(data);
                     }
                     
                 } catch (error) {

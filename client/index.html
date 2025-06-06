@@ -156,6 +156,24 @@
     <!-- TransformControls for interactive object manipulation -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
     
+    <!-- One Euro Filter for trajectory smoothing -->
+    <script src="js/one-euro-filter.js"></script>
+    
+    <!-- Global Configuration -->
+    <script>
+        // Centralized scoring zone configuration
+        window.GERF_CONFIG = {
+            scoringZones: [
+                { name: 'Bullseye', maxDistance: 0.5, points: 100, color: '#FFD700', colorHex: 0xFFD700, opacity: 0.9 },
+                { name: 'Inner Ring', maxDistance: 1, points: 50, color: '#FF6B6B', colorHex: 0xFF6B6B, opacity: 0.8 },
+                { name: 'Outer Ring', maxDistance: 1.5, points: 40, color: '#4ECDC4', colorHex: 0x4ECDC4, opacity: 0.7 },
+                { name: 'Outer Ring 2', maxDistance: 2, points: 30, color: '#9B59B6', colorHex: 0x9B59B6, opacity: 0.6 },
+                { name: 'Outer Ring 3', maxDistance: 2.5, points: 20, color: '#34495E', colorHex: 0x34495E, opacity: 0.5 },
+                { name: 'Miss', maxDistance: Infinity, points: 10, color: '#95A5A6', colorHex: 0x95A5A6, opacity: 0.4 }
+            ]
+        };
+    </script>
+    
     <!-- Application Modules -->
     <script src="js/throw-manager.js"></script>
     <script src="js/scene-manager.js"></script>
@@ -203,6 +221,30 @@
                             event.preventDefault();
                             sceneManager.downloadTargetPosition();
                             break;
+                        case 'e':
+                            event.preventDefault();
+                            throwManager.exportFilterConfig();
+                            break;
+                    }
+                } else if (event.altKey) {
+                    // One Euro Filter adjustment shortcuts
+                    switch(event.key) {
+                        case 'q':
+                            event.preventDefault();
+                            throwManager.adjustFilterSmoothness(-0.1);
+                            break;
+                        case 'w':
+                            event.preventDefault();
+                            throwManager.adjustFilterSmoothness(0.1);
+                            break;
+                        case 'a':
+                            event.preventDefault();
+                            throwManager.adjustFilterResponsiveness(-0.001);
+                            break;
+                        case 's':
+                            event.preventDefault();
+                            throwManager.adjustFilterResponsiveness(0.001);
+                            break;
                     }
                 }
             });
@@ -246,7 +288,15 @@
             console.log('  • Ctrl+R: Force end current round');
             console.log('  • Ctrl+P: Export complete leaderboard data');
             console.log('  • Ctrl+G: Download current target position (for server)');
+            console.log('  • Ctrl+E: Export One Euro Filter configuration');
+            console.log('🎛️ One Euro Filter Controls:');
+            console.log('  • Alt+Q: Decrease smoothing (more filtering)');
+            console.log('  • Alt+W: Increase smoothing (less filtering)');
+            console.log('  • Alt+A: Decrease responsiveness');
+            console.log('  • Alt+S: Increase responsiveness');
             console.log('📊 Scoring: Individual attempts leaderboard, automatic detection and scoring');
+            console.log('📈 Trajectory Smoothing: One Euro Filter applied per throw for noise reduction');
+            console.log('🎯 Scoring Zones: Automatically scale with target model size for accurate scoring');
         }
 
         // Initialize the application when DOM is loaded

@@ -10,20 +10,22 @@ class ThrowManager {
         this.throwStartTime = null;
         this.lastCoordinate = null;
         
+        // One Euro Filter for trajectory smoothing (created per throw)
+        this.trajectoryFilter = null;
+        this.filterConfig = {
+            frequency: 60,      // Expected data rate (Hz)
+            minCutoff: 1.0,     // Minimum cutoff frequency (lower = more smoothing)
+            beta: 0.007,        // Speed adaptation (higher = more responsive)
+            dCutoff: 1.0        // Derivative cutoff frequency
+        };
+        
         // Round configuration
         this.maxThrowsPerRound = 3;
         this.throwsInCurrentRound = 0;
         this.waitingForNextPlayer = false;
         
-        // Scoring configuration
-        this.scoringZones = [
-            { name: 'Bullseye', maxDistance: 2, points: 50, color: '#FFD700' },
-            { name: 'Inner Ring', maxDistance: 5, points: 25, color: '#FF6B6B' },
-            { name: 'Outer Ring', maxDistance: 10, points: 10, color: '#4ECDC4' },
-            { name: 'Outer Ring 2', maxDistance: 16, points: 5, color: '#9B59B6' },
-            { name: 'Outer Ring 3', maxDistance: 22, points: 1, color: '#34495E' },
-            { name: 'Miss', maxDistance: Infinity, points: 0, color: '#95A5A6' }
-        ];
+        // Scoring configuration - use global config
+        this.scoringZones = window.GERF_CONFIG.scoringZones;
         
         // Timing configuration
         this.autoStopDelay = 3000; // 3 seconds of no data
@@ -161,28 +163,42 @@ class ThrowManager {
             this.startThrow(currentTime);
         }
         
+        // Apply One Euro Filter to smooth trajectory data
+        let filteredCoordinates = coordinateData;
+        if (this.trajectoryFilter) {
+            filteredCoordinates = this.trajectoryFilter.filter(coordinateData, currentTime / 1000.0);
+            console.log(`Filtered coordinates: (${filteredCoordinates.x.toFixed(2)}, ${filteredCoordinates.y.toFixed(2)}, ${filteredCoordinates.z.toFixed(2)})`);
+        }
+        
         // Get current target center from scene manager
         const targetCenter = this.sceneManager ? this.sceneManager.getTargetCenter() : 
             (() => { throw new Error('SceneManager not available for target center calculation'); })();
         
-        // Calculate distance to target center
-        const distance = this.calculateDistance(coordinateData, targetCenter);
+        // Calculate distance to target center using filtered coordinates
+        const distance = this.calculateDistance(filteredCoordinates, targetCenter);
         
-        // Add coordinate to current throw
+        // Store both original and filtered coordinates
         this.currentThrow.coordinates.push({
-            ...coordinateData,
+            ...coordinateData,              // Original coordinates
+            filtered: filteredCoordinates,  // Filtered coordinates
             distance: distance,
             throwTime: currentTime - this.throwStartTime
         });
         
-        // Update closest distance
+        // Update closest distance using filtered coordinates
         if (distance < this.currentThrow.closestDistance) {
             this.currentThrow.closestDistance = distance;
-            this.currentThrow.closestPoint = { ...coordinateData };
-            console.log(`New closest point: distance ${distance.toFixed(2)}, coordinates (${coordinateData.x}, ${coordinateData.y}, ${coordinateData.z})`);
+            this.currentThrow.closestPoint = { ...filteredCoordinates };
+            console.log(`New closest point: distance ${distance.toFixed(2)}, filtered coordinates (${filteredCoordinates.x.toFixed(2)}, ${filteredCoordinates.y.toFixed(2)}, ${filteredCoordinates.z.toFixed(2)})`);
         }
         
-        this.lastCoordinate = coordinateData;
+        // Use filtered coordinates for visualization
+        this.lastCoordinate = filteredCoordinates;
+        
+        // Update 3D visualization with filtered coordinates
+        if (this.sceneManager) {
+            this.sceneManager.updatePlanePosition(filteredCoordinates);
+        }
         
         // Update live UI
         this.updateLiveUI();
@@ -194,6 +210,15 @@ class ThrowManager {
     startThrow(currentTime) {
         this.isThrowActive = true;
         this.throwStartTime = currentTime;
+        
+        // Initialize One Euro Filter for this throw
+        this.trajectoryFilter = new OneEuroFilter3D(
+            this.filterConfig.frequency,
+            this.filterConfig.minCutoff,
+            this.filterConfig.beta,
+            this.filterConfig.dCutoff
+        );
+        console.log('One Euro Filter initialized for trajectory smoothing');
         
         this.currentThrow = {
             throwNumber: this.throwsInCurrentRound + 1,
@@ -224,6 +249,12 @@ class ThrowManager {
         if (this.autoStopTimeout) {
             clearTimeout(this.autoStopTimeout);
             this.autoStopTimeout = null;
+        }
+        
+        // Clean up trajectory filter
+        if (this.trajectoryFilter) {
+            this.trajectoryFilter = null;
+            console.log('One Euro Filter cleaned up for completed throw');
         }
         
         // Finalize throw data
@@ -343,12 +374,41 @@ class ThrowManager {
     }
     
     calculateScore(distance) {
+        // Get target scale factor to adjust scoring zones
+        const targetScale = this.getTargetScale();
+        
         for (const zone of this.scoringZones) {
-            if (distance <= zone.maxDistance) {
-                return { points: zone.points, zone: zone };
+            const scaledMaxDistance = zone.maxDistance * targetScale;
+            if (distance <= scaledMaxDistance) {
+                console.log(`Score calculated: ${zone.points} points (${zone.name}) - Distance: ${distance.toFixed(2)}, Scaled threshold: ${scaledMaxDistance.toFixed(2)}, Scale factor: ${targetScale.toFixed(2)}`);
+                return { 
+                    points: zone.points, 
+                    zone: zone,
+                    scaledDistance: scaledMaxDistance,
+                    actualDistance: distance,
+                    scaleFactor: targetScale
+                };
             }
         }
-        return { points: 0, zone: this.scoringZones[this.scoringZones.length - 1] };
+        console.log(`Miss - Distance: ${distance.toFixed(2)}, Scale factor: ${targetScale.toFixed(2)}`);
+        return { 
+            points: 0, 
+            zone: this.scoringZones[this.scoringZones.length - 1],
+            scaledDistance: Infinity,
+            actualDistance: distance,
+            scaleFactor: targetScale
+        };
+    }
+    
+    // Get the current target scale factor from the scene manager
+    getTargetScale() {
+        if (this.sceneManager && this.sceneManager.archeryTarget) {
+            // Return the average scale (assuming uniform scaling)
+            const scale = this.sceneManager.archeryTarget.scale;
+            return (scale.x + scale.y + scale.z) / 3;
+        }
+        // Default scale if target not available
+        return 10.0; // Default scale from scene-manager.js
     }
     
     updateSessionStats() {
@@ -400,6 +460,9 @@ class ThrowManager {
         
         // Update round history display
         this.updateRoundHistoryDisplay();
+        
+        // Update scoring zones display with scaled values
+        this.updateScoringZonesDisplay();
         
         // Reset current throw display if not active
         if (!this.isThrowActive) {
@@ -806,5 +869,69 @@ class ThrowManager {
         }).join('');
         
         this.topAttemptsContainer.innerHTML = attemptsHTML;
+    }
+    
+    // One Euro Filter configuration methods
+    adjustFilterSmoothness(delta) {
+        this.filterConfig.minCutoff = Math.max(0.1, this.filterConfig.minCutoff + delta);
+        console.log(`Filter smoothness adjusted. minCutoff: ${this.filterConfig.minCutoff.toFixed(3)}`);
+        console.log('Lower values = more smoothing, higher values = less smoothing');
+    }
+    
+    adjustFilterResponsiveness(delta) {
+        this.filterConfig.beta = Math.max(0.001, this.filterConfig.beta + delta);
+        console.log(`Filter responsiveness adjusted. beta: ${this.filterConfig.beta.toFixed(4)}`);
+        console.log('Higher values = more responsive to speed changes');
+    }
+    
+    getFilterConfig() {
+        return { ...this.filterConfig };
+    }
+    
+    setFilterConfig(config) {
+        this.filterConfig = { ...this.filterConfig, ...config };
+        console.log('Filter configuration updated:', this.filterConfig);
+    }
+    
+    exportFilterConfig() {
+        const config = {
+            filterConfig: this.filterConfig,
+            timestamp: new Date().toISOString(),
+            description: 'One Euro Filter configuration for GERF-App trajectory smoothing'
+        };
+        
+        const dataStr = JSON.stringify(config, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `gerf-filter-config-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        
+        URL.revokeObjectURL(url);
+        console.log('Filter configuration exported');
+    }
+    
+    updateScoringZonesDisplay() {
+        const targetScale = this.getTargetScale();
+        
+        // Update the scoring zones text to show scaled distances
+        const zoneElements = document.querySelectorAll('.zone-name');
+        zoneElements.forEach((element, index) => {
+            if (index < this.scoringZones.length - 1) { // Skip the "Miss" zone
+                const zone = this.scoringZones[index];
+                const scaledDistance = (zone.maxDistance * targetScale).toFixed(1);
+                const originalText = element.textContent.split(' (')[0]; // Get zone name without distance
+                element.textContent = `${originalText} (≤${scaledDistance})`;
+            }
+        });
+        
+        console.log(`Scoring zones UI updated for scale factor: ${targetScale.toFixed(2)}`);
+    }
+    
+    // Public method to refresh scoring zones (called by scene manager when scale changes)
+    refreshScoringZones() {
+        this.updateScoringZonesDisplay();
     }
 } 

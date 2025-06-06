@@ -28,8 +28,8 @@ class SceneManager {
         this.trajectoryPoints = [];
         this.trajectoryLine = null;
         this.isTrackingTrajectory = false;
-        this.maxTrajectoryPoints = 100; // Limit trail length
-        this.trajectoryUpdateInterval = 50; // Update every 50ms
+        this.maxTrajectoryPoints = 50; // Limit trail length
+        this.trajectoryUpdateInterval = 100; // Update every 50ms
         this.lastTrajectoryUpdate = 0;
         
         this.init();
@@ -334,20 +334,28 @@ class SceneManager {
         // Position zones relative to target's local coordinate system (0,0,0)
         const localCenter = new THREE.Vector3(0, 0, 0.2); // Forward in target's local Z direction
         
-        const scoringZones = [
-            { name: 'Bullseye', radius: 0.3, color: 0xFFD700, opacity: 0.9 },
-            { name: 'Inner Ring', radius: 0.7, color: 0xFF6B6B, opacity: 0.8 },
-            { name: 'Outer Ring', radius: 1.2, color: 0x4ECDC4, opacity: 0.7 },
-            { name: 'Outer Ring 2', radius: 1.8, color: 0x9B59B6, opacity: 0.6 },
-            { name: 'Outer Ring 3', radius: 2.5, color: 0x34495E, opacity: 0.5 }
-        ];
+        // Use global scoring zone configuration (excluding Miss zone for visual rings)
+        const baseScoringZones = window.GERF_CONFIG.scoringZones.slice(0, -1).map(zone => ({
+            name: zone.name,
+            maxDistance: zone.maxDistance,
+            color: zone.colorHex,
+            opacity: zone.opacity
+        }));
+        
+        // Since rings will be children of the target, they will automatically scale with it.
+        // The ring radii should match the mathematical distance values used in scoring calculation.
+        // No conversion needed - use the maxDistance values directly as local coordinates.
+        const localScoringSizes = baseScoringZones.map(zone => ({
+            ...zone,
+            radius: zone.maxDistance // Use scoring distances directly as local coordinates
+        }));
         
         this.scoringZoneIndicators = [];
         
-        scoringZones.forEach((zone, index) => {
+        localScoringSizes.forEach((zone, index) => {
             // Create ring geometry
             const geometry = new THREE.RingGeometry(
-                index === 0 ? 0 : scoringZones[index - 1].radius,
+                index === 0 ? 0 : localScoringSizes[index - 1].radius,
                 zone.radius,
                 32
             );
@@ -364,12 +372,13 @@ class SceneManager {
             ring.position.copy(localCenter);
             // No additional rotation needed - rings inherit target's rotation as child objects
             
-            // Add as child of target instead of scene - this locks them together!
+            // Add as child of target - this makes them scale automatically with the target!
             this.archeryTarget.add(ring);
             this.scoringZoneIndicators.push(ring);
         });
         
-        console.log('Scoring zone indicators created (attached to target, will move together)');
+        console.log('Scoring zone indicators created (attached to target, will scale automatically)');
+        console.log('Zone radii in target-local space:', localScoringSizes.map(z => `${z.name}: ${z.radius.toFixed(2)}`));
     }
     
     removeScoringZoneIndicators() {
@@ -586,7 +595,7 @@ class SceneManager {
         // Reset to default values
         this.archeryTarget.position.set(-60, 80, 60);
         this.archeryTarget.rotation.set(0, Math.PI/2, 0);
-        this.archeryTarget.scale.set(10, 10, 10);
+        this.archeryTarget.scale.set(50, 50, 50);
         
         // Update target center
         this.targetCenter.x = -60;
@@ -609,11 +618,23 @@ class SceneManager {
         // Set to local space so arrows follow object orientation
         this.transformControls.setSpace('local');
         
+        // Track previous scale for uniform scaling detection
+        this.previousTargetScale = null;
+        
         // Disable orbit controls when transforming
         this.transformControls.addEventListener('dragging-changed', (event) => {
             this.isTransformActive = event.value;
             if (this.orbitControls) {
                 this.orbitControls.enabled = !event.value;
+            }
+            
+            // Store initial scale when starting to drag
+            if (event.value && this.archeryTarget && this.transformControls.object === this.archeryTarget) {
+                this.previousTargetScale = {
+                    x: this.archeryTarget.scale.x,
+                    y: this.archeryTarget.scale.y,
+                    z: this.archeryTarget.scale.z
+                };
             }
         });
         
@@ -621,10 +642,53 @@ class SceneManager {
         this.transformControls.addEventListener('objectChange', () => {
             if (this.archeryTarget && this.transformControls.object === this.archeryTarget) {
                 // Enforce uniform scaling when in scale mode
-                if (this.transformControls.mode === 'scale') {
-                    const scale = this.archeryTarget.scale;
-                    const maxScale = Math.max(scale.x, scale.y, scale.z);
-                    scale.setScalar(maxScale);
+                if (this.transformControls.mode === 'scale' && this.previousTargetScale) {
+                    const currentScale = this.archeryTarget.scale;
+                    const prevScale = this.previousTargetScale;
+                    
+                    // Calculate which axis changed the most (by ratio)
+                    const ratioX = currentScale.x / prevScale.x;
+                    const ratioY = currentScale.y / prevScale.y;
+                    const ratioZ = currentScale.z / prevScale.z;
+                    
+                    // Find the axis with the largest change from 1.0
+                    const deltaX = Math.abs(ratioX - 1.0);
+                    const deltaY = Math.abs(ratioY - 1.0);
+                    const deltaZ = Math.abs(ratioZ - 1.0);
+                    
+                    let targetRatio;
+                    if (deltaX >= deltaY && deltaX >= deltaZ) {
+                        targetRatio = ratioX;
+                    } else if (deltaY >= deltaZ) {
+                        targetRatio = ratioY;
+                    } else {
+                        targetRatio = ratioZ;
+                    }
+                    
+                    // Apply uniform scaling based on the most changed axis
+                    const newUniformScale = prevScale.x * targetRatio;
+                    currentScale.setScalar(newUniformScale);
+                    
+                    // Update previous scale for next iteration
+                    this.previousTargetScale = {
+                        x: currentScale.x,
+                        y: currentScale.y,
+                        z: currentScale.z
+                    };
+                    
+                    // Refresh scoring zone indicators with new scale
+                    if (this.scoringZoneIndicators && this.scoringZoneIndicators.length > 0) {
+                        // Remove and recreate indicators to ensure proper scaling
+                        this.removeScoringZoneIndicators();
+                        this.createScoringZoneIndicators();
+                    }
+                    
+                    // Update throw manager's scoring zones display
+                    if (window.throwManager && window.throwManager.refreshScoringZones) {
+                        window.throwManager.refreshScoringZones();
+                    }
+                    
+                    console.log(`Target scale updated: ${newUniformScale.toFixed(2)}x (ratio: ${targetRatio.toFixed(3)})`);
                 }
                 
                 // Update target center when position changes
