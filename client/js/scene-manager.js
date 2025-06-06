@@ -44,7 +44,8 @@ class SceneManager {
 
         // Camera
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this.camera.position.set(150, 100, 150); // Simple initial position
+        // Initial camera position - will be updated when target loads
+        this.camera.position.set(150, 100, 150);
         this.camera.lookAt(0, 0, 0);
 
         // Renderer
@@ -88,12 +89,14 @@ class SceneManager {
         // Load models
         this.loadModels();
 
-        // Add coordinate system helper
-        const axesHelper = new THREE.AxesHelper(50);
+        // Add coordinate system helper (smaller and thicker)
+        const axesHelper = new THREE.AxesHelper(25);
+        axesHelper.material.linewidth = 3; // Make lines thicker
         this.scene.add(axesHelper);
 
-        // Add grid
+        // Add grid shifted down in Y plane
         const gridHelper = new THREE.GridHelper(200, 20, 0x888888, 0x444444);
+        gridHelper.position.y = -100; // Shift grid down to -100
         this.scene.add(gridHelper);
 
         // Initialize simple orbit controls
@@ -111,7 +114,7 @@ class SceneManager {
     
     createStarfield() {
         const starGeometry = new THREE.BufferGeometry();
-        const starCount = 2000;
+        const starCount = 800;
         const positions = new Float32Array(starCount * 3);
         
         for (let i = 0; i < starCount * 3; i += 3) {
@@ -173,6 +176,9 @@ class SceneManager {
             // Update lighting to focus on target
             this.updateTargetLighting();
             
+            // Update camera to look towards target from behind origin
+            this.updateCameraToTargetView();
+            
             console.log('Archery target loaded successfully');
         }, undefined, (error) => {
             console.error('Error loading archery target:', error);
@@ -226,8 +232,8 @@ class SceneManager {
         
         // Rotate starfield slowly
         if (this.starfield && this.showStarfield) {
-            this.starfield.rotation.y += 0.0005;
-            this.starfield.rotation.x += 0.0002;
+            this.starfield.rotation.y += 0.0001;
+            this.starfield.rotation.x += 0.00005;
         }
         
         this.renderer.render(this.scene, this.camera);
@@ -244,12 +250,14 @@ class SceneManager {
         // Remove previous highlight if it exists
         this.removeClosestPointHighlight();
         
-        // Create a sphere to mark the closest point
-        const geometry = new THREE.SphereGeometry(2, 16, 16);
+        // Create a larger, more prominent sphere to mark the closest point
+        const geometry = new THREE.SphereGeometry(4, 20, 20); // Increased size from 2 to 4
         const material = new THREE.MeshBasicMaterial({
             color: scoringZone.color,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.95, // Increased opacity from 0.8 to 0.95
+            emissive: scoringZone.color, // Add glow effect
+            emissiveIntensity: 0.2 // Subtle glow
         });
         
         this.closestPointMarker = new THREE.Mesh(geometry, material);
@@ -294,13 +302,17 @@ class SceneManager {
             }
             
             if (this.closestPointMarker) {
-                // Pulsing scale effect
-                const scale = 1 + Math.sin(progress * Math.PI * 6) * 0.3;
+                // More dramatic pulsing scale effect
+                const scale = 1 + Math.sin(progress * Math.PI * 8) * 0.5; // Increased from 6 to 8 pulses, 0.3 to 0.5 amplitude
                 this.closestPointMarker.scale.setScalar(scale);
                 
-                // Fade out over time
-                const opacity = 0.8 * (1 - progress);
+                // Slower fade out to keep it visible longer
+                const opacity = 0.95 * (1 - progress * 0.7); // Slower fade, starts from 0.95
                 this.closestPointMarker.material.opacity = opacity;
+                
+                // Animate glow intensity
+                const glowIntensity = 0.2 + Math.sin(progress * Math.PI * 10) * 0.15;
+                this.closestPointMarker.material.emissiveIntensity = glowIntensity;
                 
                 requestAnimationFrame(animate);
             }
@@ -310,21 +322,35 @@ class SceneManager {
     }
     
     createDistanceLine(point) {
-        const targetCenter = new THREE.Vector3();
-        const center = this.getTargetCenter();
-        targetCenter.set(center.x, center.y, center.z);
+        // Calculate the forward offset position (same as scoring zones)
+        const localForwardOffset = new THREE.Vector3(0, 0, 0.2); // Same as scoring zones
+        
+        // Transform the local offset to world coordinates using the target's transformation
+        const targetForwardPosition = new THREE.Vector3();
+        if (this.archeryTarget) {
+            // Apply target's transformation to the local offset
+            targetForwardPosition.copy(localForwardOffset);
+            targetForwardPosition.applyMatrix4(this.archeryTarget.matrixWorld);
+        } else {
+            // Fallback to basic target center if target not available
+            const center = this.getTargetCenter();
+            targetForwardPosition.set(center.x, center.y, center.z + 0.2);
+        }
+        
         const closestPoint = new THREE.Vector3(point.x, point.y, point.z);
         
-        const geometry = new THREE.BufferGeometry().setFromPoints([closestPoint, targetCenter]);
+        const geometry = new THREE.BufferGeometry().setFromPoints([closestPoint, targetForwardPosition]);
         const material = new THREE.LineBasicMaterial({
-            color: 0xffffff,
+            color: 0x00ffff, // Changed from white to bright cyan for better visibility
             transparent: true,
-            opacity: 0.6,
-            linewidth: 2
+            opacity: 0.9, // Increased opacity from 0.6 to 0.9
+            linewidth: 4 // Increased linewidth from 2 to 4 (limited support in WebGL)
         });
         
         this.distanceLine = new THREE.Line(geometry, material);
         this.scene.add(this.distanceLine);
+        
+        console.log(`Distance line created from closest point to target forward position (offset by 0.2 units)`);
     }
     
     createScoringZoneIndicators() {
@@ -401,39 +427,20 @@ class SceneManager {
     // Enhanced keyboard controls
     initializeKeyboardControls() {
         document.addEventListener('keydown', (event) => {
+            // Ignore keyboard shortcuts when user is typing in input fields
+            const activeElement = document.activeElement;
+            if (activeElement && (
+                activeElement.tagName === 'INPUT' || 
+                activeElement.tagName === 'TEXTAREA' || 
+                activeElement.contentEditable === 'true'
+            )) {
+                return;
+            }
+            
             switch(event.key.toLowerCase()) {
                 case 'z':
                     // Toggle scoring zone indicators
                     this.toggleScoringZoneIndicators();
-                    break;
-                case 'x':
-                    // Clear all visual indicators
-                    this.removeClosestPointHighlight();
-                    this.removeScoringZoneIndicators();
-                    console.log('Visual indicators cleared');
-                    break;
-                case 'v':
-                    // Toggle trajectory tracking manually
-                    if (this.isTrackingTrajectory) {
-                        this.stopTrajectoryTracking();
-                    } else {
-                        this.startTrajectoryTracking();
-                    }
-                    break;
-                case 'c':
-                    // Clear trajectory
-                    if (!event.ctrlKey && !event.metaKey) {
-                        this.clearTrajectory();
-                    }
-                    break;
-                case 'l':
-                    // Show leaderboard
-                    if (!event.ctrlKey && !event.metaKey) {
-                        // Call leaderboard through the throw manager
-                        if (window.throwManager && window.throwManager.showLeaderboard) {
-                            window.throwManager.showLeaderboard();
-                        }
-                    }
                     break;
                 case 'delete':
                 case 'backspace':
@@ -458,13 +465,9 @@ class SceneManager {
                             this.transformControls.setMode('rotate');
                             console.log('Transform mode: Rotate');
                         } else {
-                            // Reset camera position (existing functionality)
-                            this.camera.position.set(150, 100, 150);
-                            this.camera.lookAt(0, 0, 0);
-                            if (this.orbitControls) {
-                                this.orbitControls.reset();
-                            }
-                            console.log('Camera position reset');
+                            // Reset camera position to behind origin relative to target
+                            this.updateCameraToTargetView();
+                            console.log('Camera position reset to target view');
                         }
                     }
                     break;
@@ -545,6 +548,42 @@ class SceneManager {
         console.log('Lighting updated to focus on target');
     }
     
+    // Update camera to position behind origin relative to target
+    updateCameraToTargetView() {
+        if (!this.archeryTarget) return;
+        
+        const targetPos = this.archeryTarget.position;
+        
+        // Calculate direction from origin to target
+        const targetDirection = new THREE.Vector3(
+            targetPos.x,
+            targetPos.y, 
+            targetPos.z
+        );
+        
+        // Position camera in opposite direction from origin (behind origin relative to target)
+        const cameraDistance = 0.6; // Scale factor for camera distance
+        const behindOriginPosition = new THREE.Vector3(
+            -targetDirection.x * cameraDistance + 50, // Add positive X offset (red axis direction)
+            -targetDirection.y * cameraDistance + 60, // Increased height offset for better viewing
+            -targetDirection.z * cameraDistance
+        );
+        
+        // Update camera position
+        this.camera.position.copy(behindOriginPosition);
+        
+        // Make camera look at the target
+        this.camera.lookAt(targetPos);
+        
+        // Update orbit controls target to focus on target
+        if (this.orbitControls) {
+            this.orbitControls.target.copy(targetPos);
+            this.orbitControls.update();
+        }
+        
+        console.log('Camera positioned behind origin relative to target');
+    }
+    
     loadTargetSettings() {
         const savedSettings = localStorage.getItem('gerf-target-settings');
         if (!savedSettings || !this.archeryTarget) return false;
@@ -581,6 +620,9 @@ class SceneManager {
             // Update lighting to focus on new target position
             this.updateTargetLighting();
             
+            // Update camera to new target position
+            this.updateCameraToTargetView();
+            
             console.log('Target settings loaded from previous session');
             return true;
         } catch (error) {
@@ -604,6 +646,9 @@ class SceneManager {
         
         // Update lighting to focus on reset position
         this.updateTargetLighting();
+        
+        // Update camera to reset position
+        this.updateCameraToTargetView();
         
         // Save the reset settings
         this.saveTargetSettings();
@@ -699,6 +744,9 @@ class SceneManager {
                     
                     // Update lighting to follow target
                     this.updateTargetLighting();
+                    
+                    // Update camera to follow target position
+                    this.updateCameraToTargetView();
                 }
                 
                 // Auto-save settings after any transformation

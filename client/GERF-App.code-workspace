@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../DART"
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "GERF-App",
+		"liveServer.settings.port": 5501
+	}
+}

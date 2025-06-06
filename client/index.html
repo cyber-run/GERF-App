@@ -199,6 +199,16 @@
 
             // Add keyboard shortcuts for throwing
             document.addEventListener('keydown', (event) => {
+                // Ignore keyboard shortcuts when user is typing in input fields
+                const activeElement = document.activeElement;
+                if (activeElement && (
+                    activeElement.tagName === 'INPUT' || 
+                    activeElement.tagName === 'TEXTAREA' || 
+                    activeElement.contentEditable === 'true'
+                )) {
+                    return;
+                }
+                
                 if (event.ctrlKey || event.metaKey) {
                     switch(event.key) {
                         case 'c':
@@ -258,10 +268,6 @@
             console.log('  • R: Reset camera position (or Rotate mode if target selected)');
             console.log('  • S: Toggle starfield (or Scale mode if target selected)');
             console.log('  • Z: Toggle scoring zone indicators');
-            console.log('  • X: Clear visual indicators');
-            console.log('  • V: Toggle trajectory tracking (manual)');
-            console.log('  • C: Clear trajectory trail');
-            console.log('  • L: Show leaderboard');
             console.log('🎯 Target Transform:');
             console.log('  • Click target to select for transformation');
             console.log('  • T: Translate mode (move target)');
@@ -294,9 +300,27 @@
             console.log('  • Alt+W: Increase smoothing (less filtering)');
             console.log('  • Alt+A: Decrease responsiveness');
             console.log('  • Alt+S: Increase responsiveness');
+            console.log('🔍 Trajectory Validation (NEW):');
+            console.log('  • Initial low-pass filtering reduces noise on physical target');
+            console.log('  • First point must be within threshold distance from origin');
+            console.log('  • Monotonic distance constraint: points must progressively move away from origin');
+            console.log('  • Use console commands below to tune trajectory validation');
             console.log('📊 Scoring: Individual attempts leaderboard, automatic detection and scoring');
             console.log('📈 Trajectory Smoothing: One Euro Filter applied per throw for noise reduction');
             console.log('🎯 Scoring Zones: Automatically scale with target model size for accurate scoring');
+            
+            // Expose trajectory validation controls to console
+            console.log('\n🔧 TRAJECTORY VALIDATION CONSOLE COMMANDS:');
+            console.log('throwManager.toggleTrajectoryValidation() - Enable/disable trajectory validation');
+            console.log('throwManager.toggleMonotonicDistance() - Enable/disable monotonic distance constraint');
+            console.log('throwManager.adjustInitialPointThreshold(±5.0) - Adjust first point max distance');
+            console.log('throwManager.adjustMinDistanceIncrease(±0.1) - Adjust minimum distance increase');
+            console.log('throwManager.adjustLowPassAlpha(±0.1) - Adjust low-pass filter strength');
+            console.log('throwManager.getTrajectoryValidationConfig() - Show current settings');
+            console.log('throwManager.getTrajectoryStats() - Show stats for current throw');
+            console.log('throwManager.exportFilterConfig() - Export all filter settings');
+            console.log('\nExample: throwManager.adjustInitialPointThreshold(-5) // Stricter first point validation');
+            console.log('Example: throwManager.toggleMonotonicDistance() // Toggle monotonic constraint\n');
         }
 
         // Initialize the application when DOM is loaded
