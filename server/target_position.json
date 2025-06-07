@@ -1,10 +1,10 @@
 {
   "target_position": {
-    "x": -80.62493317324316,
-    "y": 81.73446680482795,
-    "z": 120.2523386580497
+    "x": -47.96072580495924,
+    "y": -28.451328924276584,
+    "z": 594.4600036161175
   },
-  "exported_at": "2025-06-05T02:30:17.097Z",
+  "exported_at": "2025-06-07T23:16:30.544Z",
   "coordinate_system": "GERF_world_coordinates",
   "notes": "Target center position for linear trajectory - place in server directory"
 }

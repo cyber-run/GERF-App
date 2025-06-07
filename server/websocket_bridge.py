@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-WebSocket Bridge Server for GERF-App
-Forwards UDP coordinate data to WebSocket clients.
-This server persists in production deployment.
+Optimized WebSocket Bridge Server for GERF-App
+Uses "latest data wins" approach - always forwards most recent data, discards old packets.
+Eliminates coroutine explosion and performance degradation issues.
 """
 
 import asyncio
@@ -11,6 +11,7 @@ import socket
 import json
 import logging
 import threading
+import time
 from datetime import datetime
 from config import *
 
@@ -21,15 +22,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class UDPForwarder:
-    """Forwards UDP data to WebSocket clients."""
+class OptimizedUDPForwarder:
+    """Optimized UDP to WebSocket forwarder using latest-data-wins approach."""
     
     def __init__(self):
         self.websocket_clients = set()
         self.udp_socket = None
         self.running = False
         self.udp_thread = None
-        self.loop = None
+        
+        # Latest data approach - thread-safe
+        self._latest_message = None
+        self._message_lock = threading.Lock()
+        self._new_data_event = threading.Event()
+        
+        # Statistics
+        self.packets_received = 0
+        self.packets_sent = 0
+        self.packets_dropped = 0
+        
+        # Data starvation detection
+        self.last_udp_data_time = None
+        self.data_starvation_timeout = 5.0  # seconds
+        self.startup_grace_period = 15.0   # longer grace period for bridge
         
     def add_client(self, websocket):
         """Add a WebSocket client."""
@@ -40,13 +55,57 @@ class UDPForwarder:
         """Remove a WebSocket client."""
         self.websocket_clients.discard(websocket)
         logger.info(f"WebSocket client disconnected. Total clients: {len(self.websocket_clients)}")
+    
+    def _update_latest_message(self, message: str):
+        """Thread-safe update of the latest message. Always overwrites - latest wins."""
+        with self._message_lock:
+            if self._latest_message is not None:
+                self.packets_dropped += 1  # Previous message was never sent
+            self._latest_message = message
+            self._new_data_event.set()  # Signal that new data is available
+    
+    def _get_latest_message(self) -> str:
+        """Thread-safe retrieval of the latest message."""
+        with self._message_lock:
+            message = self._latest_message
+            self._latest_message = None  # Clear after reading
+            self._new_data_event.clear()  # Reset event
+            return message
+    
+    async def continuous_broadcast_task(self):
+        """Single async task that continuously broadcasts the latest data."""
+        logger.info("Started continuous broadcast task")
         
-    async def broadcast_to_clients(self, message):
+        while self.running:
+            try:
+                # Wait for new data (with timeout to check if we should keep running)
+                if await asyncio.get_event_loop().run_in_executor(
+                    None, self._new_data_event.wait, 1.0
+                ):
+                    # Get the latest message
+                    message = self._get_latest_message()
+                    if message and self.websocket_clients:
+                        await self._broadcast_to_clients(message)
+                        self.packets_sent += 1
+                        
+                        # Occasional statistics logging
+                        if self.packets_sent % 1000 == 0:
+                            logger.info(f"Broadcast stats - Sent: {self.packets_sent}, "
+                                      f"Received: {self.packets_received}, "
+                                      f"Dropped: {self.packets_dropped}")
+                
+            except Exception as e:
+                logger.error(f"Error in broadcast task: {e}")
+                await asyncio.sleep(0.1)  # Brief pause on error
+        
+        logger.info("Continuous broadcast task stopped")
+    
+    async def _broadcast_to_clients(self, message: str):
         """Broadcast message to all connected WebSocket clients."""
         if not self.websocket_clients:
             return
             
-        # Create list of clients to avoid modification during iteration
+        # Remove disconnected clients
         clients_to_remove = []
         
         for client in list(self.websocket_clients):
@@ -58,60 +117,68 @@ class UDPForwarder:
                 logger.warning(f"Error sending to WebSocket client: {e}")
                 clients_to_remove.append(client)
         
-        # Remove disconnected clients
+        # Clean up disconnected clients
         for client in clients_to_remove:
             self.remove_client(client)
     
     def start_udp_listener(self):
-        """Start listening for UDP data in a separate thread."""
-        packet_count = 0
+        """Start listening for UDP data in a separate thread - simplified for latest-data-wins."""
         try:
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.udp_socket.settimeout(1.0)  # Allow periodic checks
             
-            # Bind to the port to receive data from DART adapter
+            # Bind to receive data from DART adapter
             self.udp_socket.bind((UDP_HOST, UDP_PORT))
-            logger.info(f"UDP listener bound to {UDP_HOST}:{UDP_PORT}")
-            logger.info("Waiting for data from DART adapter...")
+            logger.info(f"UDP listener bound to {UDP_HOST}:{UDP_PORT} (latest-data-wins mode)")
+            logger.info(f"⚠️ Bridge data starvation detection: Will restart if no UDP data for {self.data_starvation_timeout}s")
             
             self.running = True
+            self.start_time = time.time()  # Track startup time
             
             while self.running:
                 try:
                     data, addr = self.udp_socket.recvfrom(BUFFER_SIZE)
                     message = data.decode('utf-8')
-                    packet_count += 1
+                    self.packets_received += 1
+                    self.last_udp_data_time = time.time()  # Track when we last received data
                     
-                    # Occasional logging for monitoring
-                    if packet_count <= 3 or packet_count % 1000 == 0:
+                    # Simply update the latest message - no processing, no queuing
+                    self._update_latest_message(message)
+                    
+                    # Minimal logging for monitoring
+                    if self.packets_received <= 3 or self.packets_received % 2000 == 0:
                         try:
                             json_data = json.loads(message)
-                            logger.info(f"Received packet #{packet_count}: x={json_data.get('x')}, y={json_data.get('y')}, z={json_data.get('z')}")
+                            logger.info(f"Latest data: x={json_data.get('x')}, y={json_data.get('y')}, z={json_data.get('z')} "
+                                      f"(packet #{self.packets_received})")
                         except:
-                            logger.debug(f"Received UDP data from {addr}: {message[:100]}...")
-                    
-                    # Forward message to all WebSocket clients
-                    if self.websocket_clients and self.loop:
-                        try:
-                            asyncio.run_coroutine_threadsafe(
-                                self.broadcast_to_clients(message),
-                                self.loop
-                            )
-                            # Log broadcast activity occasionally
-                            if packet_count <= 3 or packet_count % 1000 == 0:
-                                logger.info(f"Broadcasted to {len(self.websocket_clients)} WebSocket clients")
-                        except Exception as e:
-                            logger.error(f"Error scheduling broadcast: {e}")
-                    else:
-                        # Log when no clients are connected (only first few times)
-                        if packet_count <= 3:
-                            logger.warning(f"No WebSocket clients connected - packet not forwarded")
+                            logger.debug(f"Received UDP data from {addr}")
                         
                 except socket.timeout:
-                    # Normal timeout, continue
+                    # Normal timeout, but check for data starvation from adapter
+                    current_time = time.time()
+                    time_since_startup = current_time - self.start_time
+                    
+                    # Only check after grace period
+                    if time_since_startup > self.startup_grace_period:
+                        if self.last_udp_data_time is None:
+                            # No data from adapter after grace period
+                            logger.error(f"🚨 BRIDGE DATA STARVATION: No UDP data from adapter for {time_since_startup:.1f}s")
+                            logger.error("Forcing bridge restart to recover...")
+                            raise RuntimeError("Bridge data starvation - no data from adapter")
+                        else:
+                            # Check time since last adapter data
+                            time_since_data = current_time - self.last_udp_data_time
+                            if time_since_data > self.data_starvation_timeout:
+                                logger.error(f"🚨 BRIDGE DATA STARVATION: No UDP data for {time_since_data:.1f}s")
+                                logger.error(f"Last received: {self.packets_received} packets total")
+                                logger.error("Forcing bridge restart to recover...")
+                                raise RuntimeError(f"Bridge data starvation - no UDP data for {time_since_data:.1f}s")
+                    
+                    # During grace period, just continue
                     continue
                 except Exception as e:
-                    if self.running:  # Only log if we're supposed to be running
+                    if self.running:
                         logger.error(f"Error receiving UDP data: {e}")
                         
         except Exception as e:
@@ -122,25 +189,34 @@ class UDPForwarder:
             logger.info("UDP listener stopped")
     
     def start(self, loop):
-        """Start the UDP forwarder."""
+        """Start the optimized UDP forwarder."""
         if not self.running:
-            self.loop = loop
+            # Start UDP listener thread
             self.udp_thread = threading.Thread(target=self.start_udp_listener, daemon=True)
             self.udp_thread.start()
-            logger.info("UDP forwarder started")
+            
+            # Start continuous broadcast task
+            asyncio.create_task(self.continuous_broadcast_task())
+            
+            logger.info("Optimized UDP forwarder started (latest-data-wins)")
     
     def stop(self):
         """Stop the UDP forwarder."""
         self.running = False
+        self._new_data_event.set()  # Wake up broadcast task
+        
         if self.udp_thread and self.udp_thread.is_alive():
             self.udp_thread.join(timeout=2)
-        logger.info("UDP forwarder stopped")
+        
+        logger.info(f"Optimized UDP forwarder stopped. Final stats - "
+                   f"Received: {self.packets_received}, Sent: {self.packets_sent}, "
+                   f"Dropped: {self.packets_dropped}")
 
-# Global UDP forwarder instance
-udp_forwarder = UDPForwarder()
+# Global optimized forwarder instance
+udp_forwarder = OptimizedUDPForwarder()
 
 async def websocket_handler(websocket):
-    """Handle WebSocket connections."""
+    """Handle WebSocket connections - simplified."""
     client_address = websocket.remote_address
     logger.info(f"WebSocket client connected from {client_address}")
     
@@ -148,24 +224,11 @@ async def websocket_handler(websocket):
     udp_forwarder.add_client(websocket)
     
     try:
-        # Keep connection alive and handle any incoming messages
+        # Keep connection alive - minimal message handling
         async for message in websocket:
             try:
-                # Parse incoming message
-                data = json.loads(message)
-                logger.debug(f"Received message from {client_address}: {data}")
-                
-                # For now, just acknowledge receipt
-                # In the future, this could handle commands if needed
-                response = {
-                    'type': 'acknowledgment',
-                    'message': 'Message received',
-                    'timestamp': datetime.now().isoformat()
-                }
-                await websocket.send(json.dumps(response))
-                
-            except json.JSONDecodeError:
-                logger.warning(f"Invalid JSON from {client_address}: {message}")
+                # Simple acknowledgment without processing overhead
+                logger.debug(f"Received message from {client_address}")
             except Exception as e:
                 logger.error(f"Error processing message from {client_address}: {e}")
                 
@@ -176,14 +239,13 @@ async def websocket_handler(websocket):
     finally:
         # Remove client from forwarder
         udp_forwarder.remove_client(websocket)
-        logger.info(f"WebSocket client disconnected. Total clients: {len(udp_forwarder.websocket_clients)}")
 
 async def start_websocket_server():
-    """Start the WebSocket server."""
-    logger.info(f"Starting WebSocket Bridge Server on {WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
-    logger.info("This server forwards UDP data to WebSocket clients and persists in production")
+    """Start the optimized WebSocket server."""
+    logger.info(f"Starting Optimized WebSocket Bridge Server on {WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
+    logger.info("Using latest-data-wins approach - always forwards most recent data")
     
-    # Get current event loop and start UDP forwarder
+    # Get current event loop and start forwarder
     loop = asyncio.get_event_loop()
     udp_forwarder.start(loop)
     
@@ -192,10 +254,10 @@ async def start_websocket_server():
             websocket_handler,
             WEBSOCKET_HOST,
             WEBSOCKET_PORT,
-            ping_interval=20,
-            ping_timeout=10
+            ping_interval=30,  # More relaxed ping for stability
+            ping_timeout=15    # More forgiving timeout
         ):
-            logger.info("WebSocket Bridge Server is running...")
+            logger.info("Optimized WebSocket Bridge Server is running...")
             await asyncio.Future()  # Run forever
             
     except KeyboardInterrupt:
@@ -203,7 +265,7 @@ async def start_websocket_server():
     except Exception as e:
         logger.error(f"WebSocket server error: {e}")
     finally:
-        logger.info("WebSocket Bridge Server shutting down...")
+        logger.info("Optimized WebSocket Bridge Server shutting down...")
         udp_forwarder.stop()
 
 if __name__ == "__main__":

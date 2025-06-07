@@ -54,6 +54,15 @@ class DartDataAdapter:
         self.packets_sent = 0
         self.last_data_time = None
         
+        # Error tracking (Fix #8)
+        self.parse_errors = 0
+        self.send_errors = 0
+        self.last_error_time = None
+        
+        # Data starvation detection
+        self.data_starvation_timeout = 5.0  # seconds
+        self.startup_grace_period = 10.0    # seconds to allow for initial connection
+        
         # Debug tracking
         self.debug_packet_count = 0
         
@@ -64,37 +73,35 @@ class DartDataAdapter:
             return
         
         try:
-            # Set up socket for broadcast reception (same as visual tracking receiver)
+            # Set up socket for broadcast reception (Fix #9 - optimized)
             self.dart_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             # Allow multiple receivers to bind to the same port and receive broadcasts
             self.dart_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Try to enable port reuse for multiple listeners (macOS/Linux)
-            # try:
-            #     self.dart_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            #     logger.info("SO_REUSEPORT enabled - multiple listeners can share the port")
-            # except AttributeError:
-            #     logger.warning("SO_REUSEPORT not available on this system")
-            # except OSError as e:
-            #     logger.warning(f"SO_REUSEPORT failed: {e}")
+            # Enable broadcast reception and optimize buffer size
+            self.dart_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            self.dart_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)  # 64KB receive buffer
             # Bind to all interfaces to receive broadcast data
             self.dart_socket.bind(('', self.dart_udp_port))
             self.dart_socket.settimeout(1.0)
             
-            # Set up fresh UDP socket for sending to bridge
+            # Set up fresh UDP socket for sending to bridge (Fix #2 - larger buffer)
             self.gerf_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Disable buffering to ensure immediate sending
-            self.gerf_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024)
+            # Increase send buffer to prevent blocking (Fix #2)
+            self.gerf_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)  # 64KB send buffer
             
             logger.info(f"DART visual tracking adapter listening for JSON broadcasts on port {self.dart_udp_port}")
             logger.info(f"DART adapter forwarding to GERF bridge on port {self.gerf_udp_port}")
             logger.info("Expecting JSON format: {'timestamp': t, 'point_3d': [x,y,z], 'frame_id': f}")
+            logger.info("🚀 Optimizations enabled: 64KB buffers, fast JSON processing, error tracking")
             
             # Start adapter thread
             self.running = True
+            self.start_time = time.time()  # Track startup time for grace period
             self.adapter_thread = threading.Thread(target=self._adapter_loop, daemon=True)
             self.adapter_thread.start()
             
             logger.info("DART visual tracking adapter started successfully")
+            logger.info(f"⚠️ Data starvation detection: Will restart if no data for {self.data_starvation_timeout}s")
             
         except Exception as e:
             logger.error(f"Error starting DART adapter: {e}")
@@ -147,9 +154,31 @@ class DartDataAdapter:
                     logger.info(f"Processed {self.packets_received} visual tracking packets")
                 
             except socket.timeout:
-                # Normal timeout, continue
-                if self.packets_received == 0 and time.time() - (self.last_data_time or time.time()) > 10:
-                    logger.warning("No DART visual tracking data received yet. Check if visual tracking is broadcasting.")
+                # Normal timeout, but check for data starvation
+                current_time = time.time()
+                time_since_startup = current_time - self.start_time
+                
+                # Only start checking after grace period
+                if time_since_startup > self.startup_grace_period:
+                    if self.last_data_time is None:
+                        # No data received at all after grace period
+                        logger.error(f"🚨 DATA STARVATION: No data received for {time_since_startup:.1f}s after startup")
+                        logger.error("Forcing adapter restart to recover...")
+                        raise RuntimeError("Data starvation detected - no initial data received")
+                    else:
+                        # Check time since last data
+                        time_since_data = current_time - self.last_data_time
+                        if time_since_data > self.data_starvation_timeout:
+                            logger.error(f"🚨 DATA STARVATION: No data for {time_since_data:.1f}s (threshold: {self.data_starvation_timeout}s)")
+                            logger.error(f"Last data received: {self.packets_received} packets ago")
+                            logger.error("Forcing adapter restart to recover...")
+                            raise RuntimeError(f"Data starvation detected - no data for {time_since_data:.1f}s")
+                
+                # Startup grace period - just warn occasionally
+                elif self.packets_received == 0 and time_since_startup > 5.0:
+                    if int(time_since_startup) % 5 == 0:  # Log every 5 seconds during grace period
+                        logger.warning(f"Waiting for DART data... ({time_since_startup:.1f}s, grace period: {self.startup_grace_period}s)")
+                
                 continue
             except Exception as e:
                 if self.running:
@@ -203,13 +232,22 @@ class DartDataAdapter:
                 return None
             
         except json.JSONDecodeError as e:
-            logger.warning(f"JSON decode error from {addr}: {e} - Data: {data[:100]}")
+            self.parse_errors += 1
+            self.last_error_time = time.time()
+            # Log more frequently when errors occur (Fix #8)
+            if self.parse_errors <= 5 or self.parse_errors % 100 == 0:
+                logger.warning(f"JSON decode error #{self.parse_errors} from {addr}: {e} - Data: {data[:100]}")
             return None
         except (UnicodeDecodeError, ValueError) as e:
-            logger.warning(f"Data parsing error from {addr}: {e}")
+            self.parse_errors += 1
+            self.last_error_time = time.time()
+            if self.parse_errors <= 5 or self.parse_errors % 100 == 0:
+                logger.warning(f"Data parsing error #{self.parse_errors} from {addr}: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error parsing data from {addr}: {e}")
+            self.parse_errors += 1
+            self.last_error_time = time.time()
+            logger.error(f"Parse error #{self.parse_errors}: {e}")
             return None
     
     def _convert_to_gerf_format(self, dart_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -249,6 +287,8 @@ class DartDataAdapter:
             
         except Exception as e:
             logger.error(f"Error converting to GERF format: {e}")
+            self.send_errors += 1
+            self.last_error_time = time.time()
             return {
                 'x': 0, 'y': 0, 'z': 0,
                 'timestamp': time.time(),
@@ -257,30 +297,48 @@ class DartDataAdapter:
             }
     
     def _send_to_bridge(self, gerf_data: Dict[str, Any]):
-        """Send formatted data to the WebSocket bridge."""
+        """Send formatted data to the WebSocket bridge (Fix #6 - optimized)."""
         try:
-            # Add sequence number for debugging
-            gerf_data['seq'] = self.packets_sent + 1
-            
-            message = json.dumps(gerf_data).encode('utf-8')
-            self.gerf_socket.sendto(message, ('localhost', self.gerf_udp_port))
             self.packets_sent += 1
+            
+            # Fast string template instead of full JSON serialization (Fix #6)
+            x, y, z = gerf_data['x'], gerf_data['y'], gerf_data['z']
+            timestamp = gerf_data['timestamp']
+            source = gerf_data.get('source', 'unknown')
+            
+            # Fast string template (much faster than json.dumps)
+            message = f'{{"x":{x},"y":{y},"z":{z},"timestamp":{timestamp},"seq":{self.packets_sent},"source":"{source}"}}'.encode('utf-8')
+            self.gerf_socket.sendto(message, ('localhost', self.gerf_udp_port))
             
             # Debug: Print occasional packets to verify data flow
             if self.packets_sent <= 5 or self.packets_sent % 500 == 0:
-                logger.info(f"Sent packet #{self.packets_sent}: x={gerf_data['x']}, y={gerf_data['y']}, z={gerf_data['z']}")
+                logger.info(f"Sent packet #{self.packets_sent}: x={x}, y={y}, z={z}")
             
         except Exception as e:
-            logger.error(f"Error sending to bridge: {e}")
+            self.send_errors += 1
+            self.last_error_time = time.time()
+            # Log send errors with frequency control (Fix #8)
+            if self.send_errors <= 5 or self.send_errors % 100 == 0:
+                logger.error(f"Send error #{self.send_errors}: {e}")
     
     def get_statistics(self) -> Dict[str, Any]:
         """Get adapter statistics."""
+        current_time = time.time()
+        time_since_data = current_time - self.last_data_time if self.last_data_time else current_time - self.start_time
+        
         return {
             'packets_received': self.packets_received,
             'packets_sent': self.packets_sent,
             'last_data_time': self.last_data_time,
             'running': self.running,
-            'data_rate': self.packets_received / max(1, time.time() - (self.last_data_time or time.time())) if self.last_data_time else 0
+            'data_rate': self.packets_received / max(1, time.time() - (self.last_data_time or time.time())) if self.last_data_time else 0,
+            'parse_errors': self.parse_errors,
+            'send_errors': self.send_errors,
+            'error_rate': self.parse_errors / max(1, self.packets_received) * 100,
+            'last_error_time': self.last_error_time,
+            'time_since_data': time_since_data,
+            'starvation_threshold': self.data_starvation_timeout,
+            'time_until_restart': max(0, self.data_starvation_timeout - time_since_data) if time_since_data < self.data_starvation_timeout else 0
         }
 
 def start_dart_adapter(dart_port: int = 12346, gerf_port: int = 12344):
@@ -302,7 +360,10 @@ def start_dart_adapter(dart_port: int = 12346, gerf_port: int = 12344):
             if stats['packets_received'] > 0:
                 logger.info(f"Stats - Received: {stats['packets_received']}, "
                            f"Sent: {stats['packets_sent']}, "
-                           f"Rate: {stats['data_rate']:.1f} Hz")
+                           f"Rate: {stats['data_rate']:.1f} Hz, "
+                           f"Parse Errors: {stats['parse_errors']} ({stats['error_rate']:.1f}%), "
+                           f"Send Errors: {stats['send_errors']}, "
+                           f"Data Age: {stats['time_since_data']:.1f}s")
             else:
                 logger.info("Waiting for DART visual tracking broadcast data...")
                 logger.info("Troubleshooting: Ensure DART visual_track.py is running and broadcasting JSON")

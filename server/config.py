@@ -13,7 +13,7 @@ COORDINATE_RANGE_Z = (-200, 200)
 STREAM_FREQUENCY = 0.05  # seconds between coordinate updates (20 FPS)
 
 # Connection Configuration
-BUFFER_SIZE = 1024
+BUFFER_SIZE = 1024  # Note: UDP sockets now use optimized 64KB buffers (see adapter code)
 CLIENT_TIMEOUT = 30  # seconds
 
 # Logging Configuration
