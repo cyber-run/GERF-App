@@ -29,121 +29,47 @@
                     <label for="player-name">Player Name:</label>
                     <input type="text" id="player-name" placeholder="Enter player name to start..." maxlength="50">
                 </div>
-                <button id="toggle-details" class="btn btn-toggle">Show Details</button>
             </div>
             
-            <div id="scoring-details" class="scoring-details-section" style="display: none;">
-                <div class="current-throw-section">
-                    <h4>Current Round</h4>
-                    <div class="throw-stats">
-                        <div class="stat-item">
-                            <span class="stat-label">Status:</span>
-                            <span class="stat-value" id="throw-status">Waiting for player name</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Round Score:</span>
-                            <span class="stat-value" id="current-score">--</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Distance:</span>
-                            <span class="stat-value" id="closest-distance">--</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="scoring-zones-section">
-                    <h4>Scoring Zones</h4>
-                    <div class="scoring-zones">
-                        <div class="zone-item bullseye">
-                            <span class="zone-color" style="background: #FFD700;"></span>
-                            <span class="zone-name">Bullseye (≤2)</span>
-                            <span class="zone-points">50 pts</span>
-                        </div>
-                        <div class="zone-item inner">
-                            <span class="zone-color" style="background: #FF6B6B;"></span>
-                            <span class="zone-name">Inner (≤5)</span>
-                            <span class="zone-points">25 pts</span>
-                        </div>
-                        <div class="zone-item outer">
-                            <span class="zone-color" style="background: #4ECDC4;"></span>
-                            <span class="zone-name">Outer (≤10)</span>
-                            <span class="zone-points">10 pts</span>
-                        </div>
-                        <div class="zone-item outer2">
-                            <span class="zone-color" style="background: #9B59B6;"></span>
-                            <span class="zone-name">Outer 2 (≤16)</span>
-                            <span class="zone-points">5 pts</span>
-                        </div>
-                        <div class="zone-item outer3">
-                            <span class="zone-color" style="background: #34495E;"></span>
-                            <span class="zone-name">Outer 3 (≤22)</span>
-                            <span class="zone-points">1 pt</span>
-                        </div>
-                        <div class="zone-item miss">
-                            <span class="zone-color" style="background: #95A5A6;"></span>
-                            <span class="zone-name">Miss (>22)</span>
-                            <span class="zone-points">0 pts</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="throw-controls">
-                    <button id="clear-history" class="btn btn-secondary">Clear History</button>
-                </div>
-            </div>
+
         </div>
 
         <!-- Leaderboard Panel -->
         <div id="leaderboard-panel">
-            <h3>🏆 Leaderboard</h3>
+            <h3>🏆 Game History</h3>
             
-            <!-- Top 3 Best Attempts -->
-            <div class="top-attempts-section">
+            <!-- Combined Top Attempts and Recent Rounds -->
+            <div class="history-section">
                 <h4>🥇 Top 3 Attempts</h4>
                 <div id="top-attempts-container">
                     <p class="no-attempts">No attempts yet</p>
                 </div>
-            </div>
-            
-            <!-- Session Stats -->
-            <div class="session-stats-section">
-                <h4>📊 Session Stats</h4>
-                <div class="session-stats">
-                    <div class="stat-item">
-                        <span class="stat-label">Rounds:</span>
-                        <span class="stat-value" id="throw-count">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Total Score:</span>
-                        <span class="stat-value" id="session-score">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Best Round:</span>
-                        <span class="stat-value" id="best-throw">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Bullseyes:</span>
-                        <span class="stat-value" id="bullseye-count">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Avg Score:</span>
-                        <span class="stat-value" id="average-distance">0.0</span>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Recent Rounds -->
-            <div class="recent-rounds-section">
+                
                 <h4>📈 Recent Rounds</h4>
                 <div id="throw-history-container">
                     <p class="no-throws">No rounds completed yet</p>
                 </div>
             </div>
             
-            <div class="leaderboard-controls">
-                <button id="show-full-leaderboard" class="btn btn-primary">Show Full Leaderboard</button>
-                <button id="clear-attempts" class="btn btn-secondary">Clear All Attempts</button>
+            <!-- Session Stats (moved here from scoring panel) -->
+            <div class="session-stats-section">
+                <h4>📊 Session Stats</h4>
+                <div class="session-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Total Throws:</span>
+                        <span class="stat-value" id="throw-count">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Distance:</span>
+                        <span class="stat-value" id="session-score">0.0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Avg Distance:</span>
+                        <span class="stat-value" id="average-distance">0.0</span>
+                    </div>
+                </div>
             </div>
+
         </div>
     </div>
 

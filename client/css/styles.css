@@ -549,6 +549,11 @@ body {
     color: #FFD700 !important;
 }
 
+.throw-status-preview {
+    color: #9C27B0 !important;
+    font-style: italic;
+}
+
 /* Scoring zones display */
 .scoring-zones {
     display: flex;
@@ -844,37 +849,7 @@ body {
     }
 }
 
-.btn-toggle {
-    width: 100%;
-    padding: 8px 12px;
-    margin-top: 10px;
-    background: linear-gradient(135deg, #6366f1, #4f46e5);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
 
-.btn-toggle:hover {
-    background: linear-gradient(135deg, #4f46e5, #4338ca);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-}
-
-.scoring-details-section {
-    overflow: hidden;
-    transition: all 0.3s ease;
-    margin-top: 15px;
-}
-
-.scoring-details-section.collapsing {
-    transition: max-height 0.3s ease;
-}
 
 /* New Leaderboard Panel */
 #leaderboard-panel {
@@ -913,13 +888,18 @@ body {
     padding-bottom: 5px;
 }
 
-.top-attempts-section {
+.history-section {
     margin-bottom: 20px;
 }
 
+.history-section h4:first-of-type {
+    margin-top: 0;
+}
+
 #top-attempts-container {
-    max-height: 180px;
+    max-height: 160px;
     overflow-y: auto;
+    margin-bottom: 15px;
 }
 
 .attempt-item {
@@ -931,6 +911,11 @@ body {
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.1);
     transition: all 0.3s ease;
+}
+
+.attempt-item.compact {
+    padding: 8px 10px;
+    margin-bottom: 6px;
 }
 
 .attempt-item:hover {
@@ -987,37 +972,19 @@ body {
     color: rgba(255, 255, 255, 0.6);
 }
 
-.recent-rounds-section {
-    margin-bottom: 20px;
+.attempt-distance {
+    margin-top: 2px;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
 }
 
-.recent-rounds-section #throw-history-container {
-    max-height: 200px;
+#throw-history-container {
+    max-height: 160px;
     overflow-y: auto;
 }
 
-.leaderboard-controls {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 15px;
-}
 
-.leaderboard-controls .btn {
-    padding: 10px;
-    font-size: 12px;
-}
-
-.btn-primary {
-    background: linear-gradient(135deg, #2196F3, #1976D2);
-    color: white;
-}
-
-.btn-primary:hover {
-    background: linear-gradient(135deg, #1976D2, #1565C0);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
-}
 
 .no-attempts {
     text-align: center;
@@ -1025,4 +992,15 @@ body {
     font-style: italic;
     padding: 20px;
     font-size: 12px;
+}
+
+/* Session stats in leaderboard panel */
+#leaderboard-panel .session-stats-section {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#leaderboard-panel .session-stats-section h4 {
+    margin-top: 0;
 } 

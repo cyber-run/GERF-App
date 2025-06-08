@@ -25,7 +25,7 @@ class ThrowManager {
             initialPointMaxDistance: 199.0,     // Maximum distance from origin for first valid point
             requireMonotonicDistance: true,     // Require points to be progressively further from origin
             minDistanceIncrease: 1,          // Minimum distance increase between consecutive points
-            maxPointsWithoutIncrease: 0,       // Allow a few points without distance increase (for noise)
+            maxPointsWithoutIncrease: 5,       // Allow a few points without distance increase (for noise)
             lowPassAlpha: 0.3                  // Low-pass filter alpha for initial noise reduction (0.0-1.0)
         };
         
@@ -51,12 +51,9 @@ class ThrowManager {
         
         // Session statistics
         this.sessionStats = {
-            totalRounds: 0,
             totalThrows: 0,
-            totalScore: 0,
-            bestRound: 0,
-            bullseyes: 0,
-            averageScore: 0
+            totalTrajectoryDistance: 0,
+            averageTrajectoryDistance: 0
         };
         
         // Individual attempts leaderboard (much simpler than player database)
@@ -70,42 +67,13 @@ class ThrowManager {
     initializeUI() {
         // Get UI elements
         this.playerNameInput = document.getElementById('player-name');
-        this.toggleDetailsBtn = document.getElementById('toggle-details');
-        this.scoringDetailsSection = document.getElementById('scoring-details');
-        this.roundCountDisplay = document.getElementById('throw-count');
-        this.currentScoreDisplay = document.getElementById('current-score');
-        this.closestDistanceDisplay = document.getElementById('closest-distance');
-        this.throwStatusDisplay = document.getElementById('throw-status');
-        this.sessionScoreDisplay = document.getElementById('session-score');
-        this.bestThrowDisplay = document.getElementById('best-throw');
-        this.bullseyeCountDisplay = document.getElementById('bullseye-count');
+        this.totalThrowsDisplay = document.getElementById('throw-count');
+        this.totalDistanceDisplay = document.getElementById('session-score');
         this.averageDistanceDisplay = document.getElementById('average-distance');
         this.throwHistoryContainer = document.getElementById('throw-history-container');
-        this.clearHistoryBtn = document.getElementById('clear-history');
         
         // New leaderboard panel elements
         this.topAttemptsContainer = document.getElementById('top-attempts-container');
-        this.showFullLeaderboardBtn = document.getElementById('show-full-leaderboard');
-        this.clearAttemptsBtn = document.getElementById('clear-attempts');
-        
-        // Bind event listeners
-        if (this.clearHistoryBtn) {
-            this.clearHistoryBtn.addEventListener('click', () => this.clearRoundHistory());
-        }
-        
-        // New leaderboard panel event listeners
-        if (this.showFullLeaderboardBtn) {
-            this.showFullLeaderboardBtn.addEventListener('click', () => this.showLeaderboard());
-        }
-        if (this.clearAttemptsBtn) {
-            this.clearAttemptsBtn.addEventListener('click', () => this.clearAttemptsLeaderboard());
-        }
-        
-        // Toggle details functionality
-        if (this.toggleDetailsBtn && this.scoringDetailsSection) {
-            this.detailsVisible = false;
-            this.toggleDetailsBtn.addEventListener('click', () => this.toggleScoringDetails());
-        }
         
         // Player name input with auto-start functionality
         if (this.playerNameInput) {
@@ -132,16 +100,22 @@ class ThrowManager {
         }
         
         this.updateUI();
-        this.updateThrowStatus('Waiting for player name');
         this.waitingForNextPlayer = true;
-        
-        // Load saved preferences after all UI setup is complete
-        this.loadDetailsPreference();
     }
     
     startNewRound(playerName) {
         this.waitingForNextPlayer = false;
         this.throwsInCurrentRound = 0;
+        
+        // Clear any preview trajectory from unfiltered mode
+        if (this.sceneManager) {
+            if (this.sceneManager.clearTrajectory) {
+                this.sceneManager.clearTrajectory();
+            }
+            if (this.sceneManager.stopTrajectoryTracking) {
+                this.sceneManager.stopTrajectoryTracking();
+            }
+        }
         
         this.currentRound = {
             player: playerName,
@@ -157,7 +131,6 @@ class ThrowManager {
         }
         
         console.log(`Starting new round for player: ${playerName}`);
-        this.updateThrowStatus(`${playerName} - Ready for throw 1/3`);
         this.updateUI();
     }
     
@@ -167,9 +140,10 @@ class ThrowManager {
             return;
         }
         
-        // Skip if waiting for player name
+        // Handle unfiltered trajectory display when not in a round
         if (this.waitingForNextPlayer || !this.currentRound) {
-            console.log('Skipping coordinate - waiting for player name or no active round');
+            console.log('Showing unfiltered trajectory - no active round');
+            this.handleUnfilteredTrajectory(coordinateData);
             return;
         }
         
@@ -249,12 +223,36 @@ class ThrowManager {
             this.sceneManager.updatePlanePosition(filteredCoordinates);
         }
         
-        // Update live UI
-        this.updateLiveUI();
+
         
         // Reset auto-stop timer
         this.resetAutoStopTimer();
     }
+    
+    // Handle trajectory display when not in a round (unfiltered)
+    handleUnfilteredTrajectory(coordinateData) {
+        console.log(`Unfiltered coordinate: (${coordinateData.x.toFixed(2)}, ${coordinateData.y.toFixed(2)}, ${coordinateData.z.toFixed(2)})`);
+        
+        // Update 3D visualization with raw coordinates (no filtering)
+        if (this.sceneManager) {
+            this.sceneManager.updatePlanePosition(coordinateData);
+        }
+        
+        // Store as last coordinate for reference
+        this.lastCoordinate = coordinateData;
+        
+        // Start/continue trajectory tracking in scene manager for visual feedback
+        if (this.sceneManager) {
+            // Ensure trajectory tracking is active for visual feedback
+            if (this.sceneManager.startTrajectoryTracking) {
+                this.sceneManager.startTrajectoryTracking();
+            }
+        }
+        
+
+    }
+    
+
     
     startThrow(currentTime) {
         this.isThrowActive = true;
@@ -282,11 +280,11 @@ class ThrowManager {
             closestPoint: null,
             score: 0,
             scoringZone: null,
-            duration: 0
+            duration: 0,
+            trajectoryDistance: 0               // Total distance traveled during trajectory
         };
         
         console.log(`Throw ${this.currentThrow.throwNumber}/3 started for ${this.currentRound.player}`);
-        this.updateThrowStatus(`${this.currentRound.player} - Throw ${this.currentThrow.throwNumber}/3 active`);
         
         // Start trajectory tracking
         if (this.sceneManager && this.sceneManager.startThrowTrajectory) {
@@ -417,9 +415,16 @@ class ThrowManager {
         this.currentThrow.endTime = new Date().toISOString();
         this.currentThrow.duration = Date.now() - this.throwStartTime;
         
-        // Calculate final score
+        // Calculate trajectory distance using valid coordinates (filtered trajectory)
+        this.currentThrow.trajectoryDistance = this.calculateTrajectoryDistance(this.currentThrow.validCoordinates);
+        
+        // Calculate final score (zone points + trajectory distance)
         const scoringResult = this.calculateScore(this.currentThrow.closestDistance);
-        this.currentThrow.score = scoringResult.points;
+        const zonePoints = scoringResult.points;
+        const totalScore = Math.round(zonePoints + this.currentThrow.trajectoryDistance);
+        
+        this.currentThrow.score = totalScore;
+        this.currentThrow.zonePoints = zonePoints; // Store original zone points separately
         this.currentThrow.scoringZone = scoringResult.zone;
         
         // Add to current round
@@ -435,15 +440,12 @@ class ThrowManager {
             this.sceneManager.highlightClosestPoint(this.currentThrow.closestPoint, scoringResult.zone);
         }
         
-        console.log(`Throw ${this.currentThrow.throwNumber}/3 completed: ${this.currentThrow.score} points (${scoringResult.zone.name})`);
+        console.log(`Throw ${this.currentThrow.throwNumber}/3 completed: ${this.currentThrow.score} points (${zonePoints} zone + ${this.currentThrow.trajectoryDistance.toFixed(2)} distance) - ${scoringResult.zone.name}`);
         console.log(`Round total so far: ${this.currentRound.totalScore} points`);
         
         // Check if round is complete
         if (this.throwsInCurrentRound >= this.maxThrowsPerRound) {
             this.completeRound();
-        } else {
-            // Prepare for next throw
-            this.updateThrowStatus(`${this.currentRound.player} - Ready for throw ${this.throwsInCurrentRound + 1}/3`);
         }
         
         this.currentThrow = null;
@@ -495,10 +497,9 @@ class ThrowManager {
             this.playerNameInput.focus();
         }
         
-        this.updateThrowStatus('Next player - press Enter');
         this.updateUI();
         
-        console.log('Round completed, waiting for next player');
+        console.log('Round completed, waiting for next player - unfiltered preview mode active');
     }
     
     resetAutoStopTimer() {
@@ -527,6 +528,17 @@ class ThrowManager {
         const dy = point1.y - point2.y;
         const dz = point1.z - point2.z;
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    
+    calculateTrajectoryDistance(coordinates) {
+        if (!coordinates || coordinates.length < 2) return 0;
+        
+        let totalDistance = 0;
+        for (let i = 1; i < coordinates.length; i++) {
+            totalDistance += this.calculateDistance(coordinates[i - 1], coordinates[i]);
+        }
+        
+        return totalDistance;
     }
     
     calculateScore(distance) {
@@ -568,89 +580,35 @@ class ThrowManager {
     }
     
     updateSessionStats() {
-        this.sessionStats.totalRounds = this.roundHistory.length;
         this.sessionStats.totalThrows = this.roundHistory.reduce((sum, round) => sum + round.throws.length, 0);
-        this.sessionStats.totalScore = this.roundHistory.reduce((sum, round) => sum + round.totalScore, 0);
-        this.sessionStats.bestRound = Math.max(...this.roundHistory.map(round => round.totalScore), 0);
-        this.sessionStats.bullseyes = this.roundHistory.reduce((sum, round) => 
-            sum + round.throws.filter(throw_ => throw_.scoringZone?.name === 'Bullseye').length, 0);
+        this.sessionStats.totalTrajectoryDistance = this.roundHistory.reduce((sum, round) => 
+            sum + round.throws.reduce((throwSum, throw_) => throwSum + (throw_.trajectoryDistance || 0), 0), 0);
         
-        this.sessionStats.averageScore = this.roundHistory.length > 0 ? 
-            this.sessionStats.totalScore / this.roundHistory.length : 0;
-    }
-    
-    updateLiveUI() {
-        if (!this.currentThrow) return;
-        
-        if (this.closestDistanceDisplay) {
-            this.closestDistanceDisplay.textContent = this.currentThrow.closestDistance.toFixed(2);
-        }
-        
-        // Show current potential score
-        const potentialScore = this.calculateScore(this.currentThrow.closestDistance);
-        if (this.currentScoreDisplay) {
-            this.currentScoreDisplay.textContent = potentialScore.points;
-            this.currentScoreDisplay.style.color = potentialScore.zone.color;
-        }
+        this.sessionStats.averageTrajectoryDistance = this.sessionStats.totalThrows > 0 ? 
+            this.sessionStats.totalTrajectoryDistance / this.sessionStats.totalThrows : 0;
     }
     
     updateUI() {
-        // Update round count (instead of throw count)
-        if (this.roundCountDisplay) {
-            this.roundCountDisplay.textContent = this.sessionStats.totalRounds;
+        // Update throw count
+        if (this.totalThrowsDisplay) {
+            this.totalThrowsDisplay.textContent = this.sessionStats.totalThrows;
         }
         
-        // Update session statistics (now based on rounds)
-        if (this.sessionScoreDisplay) {
-            this.sessionScoreDisplay.textContent = this.sessionStats.totalScore;
+        // Update total trajectory distance
+        if (this.totalDistanceDisplay) {
+            this.totalDistanceDisplay.textContent = this.sessionStats.totalTrajectoryDistance.toFixed(1);
         }
-        if (this.bestThrowDisplay) {
-            this.bestThrowDisplay.textContent = this.sessionStats.bestRound;
-        }
-        if (this.bullseyeCountDisplay) {
-            this.bullseyeCountDisplay.textContent = this.sessionStats.bullseyes;
-        }
+        
+        // Update average trajectory distance
         if (this.averageDistanceDisplay) {
-            this.averageDistanceDisplay.textContent = this.sessionStats.averageScore.toFixed(1);
+            this.averageDistanceDisplay.textContent = this.sessionStats.averageTrajectoryDistance.toFixed(1);
         }
         
         // Update round history display
         this.updateRoundHistoryDisplay();
         
-        // Update scoring zones display with scaled values
-        this.updateScoringZonesDisplay();
-        
-        // Reset current throw display if not active
-        if (!this.isThrowActive) {
-            if (this.currentScoreDisplay) {
-                this.currentScoreDisplay.textContent = this.currentRound ? 
-                    this.currentRound.totalScore : '--';
-                this.currentScoreDisplay.style.color = '';
-            }
-            if (this.closestDistanceDisplay) {
-                this.closestDistanceDisplay.textContent = '--';
-            }
-        }
-        
         // Update top attempts display
         this.updateTopAttemptsDisplay();
-    }
-    
-    updateThrowStatus(status) {
-        if (this.throwStatusDisplay) {
-            this.throwStatusDisplay.textContent = status;
-            
-            // Update CSS class based on status
-            if (status.includes('active')) {
-                this.throwStatusDisplay.className = 'throw-status-active';
-            } else if (status.includes('Ready') || status.includes('Waiting')) {
-                this.throwStatusDisplay.className = 'throw-status-ready';
-            } else if (status.includes('complete')) {
-                this.throwStatusDisplay.className = 'throw-status-complete';
-            } else {
-                this.throwStatusDisplay.className = '';
-            }
-        }
     }
     
     updateRoundHistoryDisplay() {
@@ -685,7 +643,9 @@ class ThrowManager {
         if (!this.currentThrow || !this.currentRound) return;
         
         const result = this.currentThrow;
-        const message = `Throw ${result.throwNumber}/3: ${result.score} points (${result.scoringZone?.name || 'Miss'})`;
+        const zonePoints = result.zonePoints || 0;
+        const trajectoryPoints = Math.round(result.trajectoryDistance || 0);
+        const message = `Throw ${result.throwNumber}/3: ${result.score} points\n${zonePoints} (${result.scoringZone?.name || 'Miss'}) + ${trajectoryPoints} (distance)`;
         
         // Create temporary notification
         const notification = document.createElement('div');
@@ -704,6 +664,8 @@ class ThrowManager {
             z-index: 1000;
             border: 2px solid ${result.scoringZone?.color || '#95A5A6'};
             backdrop-filter: blur(10px);
+            text-align: center;
+            white-space: pre-line;
         `;
         notification.textContent = message;
         
@@ -785,12 +747,9 @@ class ThrowManager {
         if (confirm('Are you sure you want to clear all round history? This cannot be undone.')) {
             this.roundHistory = [];
             this.sessionStats = {
-                totalRounds: 0,
                 totalThrows: 0,
-                totalScore: 0,
-                bestRound: 0,
-                bullseyes: 0,
-                averageScore: 0
+                totalTrajectoryDistance: 0,
+                averageTrajectoryDistance: 0
             };
             this.saveRoundHistory();
             this.updateUI();
@@ -823,33 +782,7 @@ class ThrowManager {
         return { ...this.sessionStats };
     }
     
-    toggleScoringDetails() {
-        if (!this.scoringDetailsSection || !this.toggleDetailsBtn) return;
-        
-        if (this.detailsVisible) {
-            // Hide details
-            this.scoringDetailsSection.style.display = 'none';
-            this.toggleDetailsBtn.textContent = 'Show Details';
-        } else {
-            // Show details
-            this.scoringDetailsSection.style.display = 'block';
-            this.toggleDetailsBtn.textContent = 'Hide Details';
-        }
-        
-        this.detailsVisible = !this.detailsVisible;
-        
-        // Save preference
-        localStorage.setItem('gerf-details-visible', this.detailsVisible.toString());
-    }
-    
-    loadDetailsPreference() {
-        // Load saved preference for details visibility
-        const savedPreference = localStorage.getItem('gerf-details-visible');
-        if (savedPreference === 'true') {
-            this.detailsVisible = false; // Will be toggled to true
-            this.toggleScoringDetails();
-        }
-    }
+
     
     // Individual attempts leaderboard (much simpler than player database)
     loadAttemptsLeaderboard() {
@@ -885,8 +818,10 @@ class ThrowManager {
             totalScore: roundScore,
             throws: throws.map(throw_ => ({
                 score: throw_.score,
+                zonePoints: throw_.zonePoints || 0,
                 zone: throw_.scoringZone?.name || 'Miss',
-                distance: throw_.closestDistance
+                distance: throw_.closestDistance,
+                trajectoryDistance: throw_.trajectoryDistance || 0
             })),
             duration: roundDuration,
             targetPosition: this.sceneManager ? this.sceneManager.getTargetCenter() : null
@@ -965,35 +900,7 @@ class ThrowManager {
         console.log('Attempts leaderboard exported');
     }
     
-    clearAttemptsLeaderboard() {
-        if (confirm('Are you sure you want to clear all attempts data? This cannot be undone.')) {
-            this.attemptsLeaderboard = [];
-            this.saveAttemptsLeaderboard();
-            this.updateTopAttemptsDisplay();
-            console.log('Attempts leaderboard cleared');
-        }
-    }
-    
-    showLeaderboard() {
-        const topAttempts = this.getLeaderboard('totalScore', 10);
-        
-        if (topAttempts.length === 0) {
-            alert('No attempts recorded yet!');
-            return;
-        }
-        
-        let leaderboardText = '🏆 TOP 10 ATTEMPTS - BEST SCORES 🏆\n\n';
-        topAttempts.forEach((attempt, index) => {
-            const date = new Date(attempt.date).toLocaleDateString();
-            const throwScores = attempt.throws.map(t => t.score).join(' + ');
-            
-            leaderboardText += `${index + 1}. ${attempt.playerName} - ${attempt.totalScore} pts\n`;
-            leaderboardText += `   Throws: ${throwScores} | Date: ${date}\n`;
-            leaderboardText += `   Best zones: ${attempt.throws.map(t => t.zone).join(', ')}\n\n`;
-        });
-        
-        alert(leaderboardText);
-    }
+
     
     updateTopAttemptsDisplay() {
         if (!this.topAttemptsContainer) return;
@@ -1009,17 +916,12 @@ class ThrowManager {
         const medals = ['🥇', '🥈', '🥉'];
         
         const attemptsHTML = topAttempts.map((attempt, index) => {
-            const date = new Date(attempt.date).toLocaleDateString();
-            const throwScores = attempt.throws.map(t => t.score).join(' + ');
-            
             return `
-                <div class="attempt-item ${placementClasses[index]}">
+                <div class="attempt-item ${placementClasses[index]} compact">
                     <div class="attempt-info">
                         <div class="attempt-player">${medals[index]} ${attempt.playerName}</div>
                         <div class="attempt-score">${attempt.totalScore}</div>
                     </div>
-                    <div class="attempt-details">${date}</div>
-                    <div class="attempt-throws">${throwScores}</div>
                 </div>
             `;
         }).join('');
@@ -1123,25 +1025,5 @@ class ThrowManager {
         console.log('Complete filter configuration exported (One Euro + Trajectory Validation)');
     }
     
-    updateScoringZonesDisplay() {
-        const targetScale = this.getTargetScale();
-        
-        // Update the scoring zones text to show scaled distances
-        const zoneElements = document.querySelectorAll('.zone-name');
-        zoneElements.forEach((element, index) => {
-            if (index < this.scoringZones.length - 1) { // Skip the "Miss" zone
-                const zone = this.scoringZones[index];
-                const scaledDistance = (zone.maxDistance * targetScale).toFixed(1);
-                const originalText = element.textContent.split(' (')[0]; // Get zone name without distance
-                element.textContent = `${originalText} (≤${scaledDistance})`;
-            }
-        });
-        
-        console.log(`Scoring zones UI updated for scale factor: ${targetScale.toFixed(2)}`);
-    }
-    
-    // Public method to refresh scoring zones (called by scene manager when scale changes)
-    refreshScoringZones() {
-        this.updateScoringZonesDisplay();
-    }
+
 } 
